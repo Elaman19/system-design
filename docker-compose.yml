@@ -5,20 +5,26 @@ services:
       - '3000:3000'
     env_file: .env
     environment:
-      # This container runs the built production artifact (Dockerfile strips
-      # devDependencies, incl. pino-pretty), so it must run as production
-      # regardless of NODE_ENV in .env — overrides env_file, which still
-      # supplies every other var.
+      # .env is host-oriented (see .env.example) for `npm run start:dev` and the
+      # TypeORM CLI running directly on the host. Override just the vars that
+      # need to differ inside the Compose network; env_file still supplies
+      # everything else (credentials, PORT, ...).
+      # - This container runs the built production artifact (Dockerfile strips
+      #   devDependencies, incl. pino-pretty), so it must run as production.
       NODE_ENV: production
+      DB_HOST: postgres
+      REDIS_URL: redis://redis:6379
+      OPENSEARCH_URL: http://opensearch:9200
+      S3_ENDPOINT: http://seaweedfs:8333
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       opensearch:
-        condition: service_started
+        condition: service_healthy
       seaweedfs:
-        condition: service_started
+        condition: service_healthy
 
   postgres:
     image: postgres:17-alpine
@@ -58,6 +64,15 @@ services:
       - '9200:9200'
     volumes:
       - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -sf http://localhost:9200/_cluster/health || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   # minio/minio now requires a Docker Hub login to pull, so we use SeaweedFS's
   # S3 gateway instead. It runs without an -s3.config, so it accepts any
@@ -71,6 +86,11 @@ services:
       - '8888:8888' # filer UI/API (browse stored objects)
     volumes:
       - seaweedfs-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:8333/']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   pgdata:

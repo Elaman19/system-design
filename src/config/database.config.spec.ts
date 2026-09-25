@@ -42,4 +42,20 @@ describe('databaseConfig', () => {
     });
     expect(options).not.toHaveProperty('autoLoadEntities');
   });
+
+  it('throws when DB_PORT is not a valid integer', () => {
+    process.env.DB_PORT = 'not-a-number';
+
+    expect(() => databaseConfig()).toThrow(
+      'DB_PORT must be a positive integer, got: not-a-number',
+    );
+  });
+
+  it('throws when DB_PORT is not positive', () => {
+    process.env.DB_PORT = '0';
+
+    expect(() => databaseConfig()).toThrow(
+      'DB_PORT must be a positive integer, got: 0',
+    );
+  });
 });

@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { parse } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
+
+// DB_USER/DB_PASSWORD/DB_PORT must match whatever Compose actually starts Postgres
+// with, so read them from .env.example (checked in, always present) instead of
+// duplicating literals that could silently drift out of sync.
+const exampleEnv = parse(readFileSync(new URL('.env.example', import.meta.url)));
 
 export default defineConfig({
   // Resolves the path aliases declared in tsconfig.json, including the ones
@@ -11,11 +18,11 @@ export default defineConfig({
     include: ['src/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
     env: {
       NODE_ENV: 'test',
-      DB_HOST: 'localhost',
-      DB_PORT: '5432',
-      DB_USER: 'app',
-      DB_PASSWORD: 'app',
-      DB_NAME: 'app_test',
+      DB_HOST: 'localhost', // tests run on the host, not inside the Compose network
+      DB_PORT: exampleEnv.DB_PORT,
+      DB_USER: exampleEnv.DB_USER,
+      DB_PASSWORD: exampleEnv.DB_PASSWORD,
+      DB_NAME: 'app_test', // isolated from the app's own database, see AGENTS.md
     },
     coverage: {
       provider: 'v8',
@@ -29,24 +36,9 @@ export default defineConfig({
       ],
       thresholds: {
         lines: 100,
+        branches: 100,
         functions: 100,
         statements: 100,
-        // Global branches floor is below 100/98 only because of a single, well-understood gap
-        // (see the per-file entry and comment below). Raise this back toward 100 as soon as
-        // new real conditional logic dilutes that fixed gap enough to clear it — do not treat
-        // 83 as a permanent target.
-        branches: 83,
-        // TypeScript's emitDecoratorMetadata (required for Nest's constructor-based DI)
-        // compiles every decorated class with constructor params to include a
-        // `typeof Reflect.metadata === 'function'` guard. It's always true here since
-        // reflect-metadata is loaded app-wide, so the false branch is unreachable without
-        // faking an environment that can't occur in this app. Inline v8/istanbul ignore
-        // comments can't suppress it either (verified): the branch has no matching node in
-        // the original source, only in the compiler-emitted helper. Add a file entry here,
-        // with this same justification, whenever a new class hits the same wall.
-        'src/app.controller.ts': {
-          branches: 50,
-        },
       },
     },
   },

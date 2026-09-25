@@ -9,8 +9,8 @@
   "scripts": {
     "build": "nest build",
     "deploy": "nest deploy",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"**/*.{json,yml,yaml,md}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"**/*.{json,yml,yaml,md}\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "db:test:up": "docker compose up -d --wait postgres",
+    "db:test:up": "cp -n .env.example .env && docker compose up -d --wait postgres && npm run db:test:ensure",
+    "db:test:ensure": "docker compose exec -T postgres psql -U app -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname='app_test'\" | grep -q 1 || docker compose exec -T postgres psql -U app -d postgres -c \"CREATE DATABASE app_test\"",
     "migration:generate": "typeorm-ts-node-esm migration:generate -d src/data-source.ts",
     "migration:run": "typeorm-ts-node-esm migration:run -d src/data-source.ts",
     "ci": "npm run db:test:up && npm run typecheck && npm run lint && npm run format:check && npm run test:cov"
@@ -55,6 +56,7 @@
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^6.0.2",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^4.1.2"

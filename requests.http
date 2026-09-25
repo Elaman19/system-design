@@ -1,0 +1,7 @@
+### Hello world
+GET http://localhost:3000/
+
+# Expected response: 200 OK
+# Content-Type: text/html; charset=utf-8
+#
+# Hello World!
