@@ -4,6 +4,12 @@ services:
     ports:
       - '3000:3000'
     env_file: .env
+    environment:
+      # This container runs the built production artifact (Dockerfile strips
+      # devDependencies, incl. pino-pretty), so it must run as production
+      # regardless of NODE_ENV in .env — overrides env_file, which still
+      # supplies every other var.
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
@@ -11,7 +17,7 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_started
-      minio:
+      seaweedfs:
         condition: service_started
 
   postgres:
@@ -53,19 +59,20 @@ services:
     volumes:
       - opensearch-data:/usr/share/opensearch/data
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+  # minio/minio now requires a Docker Hub login to pull, so we use SeaweedFS's
+  # S3 gateway instead. It runs without an -s3.config, so it accepts any
+  # credentials; S3_ACCESS_KEY/S3_SECRET_KEY in .env are placeholders the app's
+  # S3 client still needs to send, not values SeaweedFS actually checks.
+  seaweedfs:
+    image: chrislusf/seaweedfs
+    command: server -dir=/data -s3 -s3.port=8333
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - '8333:8333' # S3 API
+      - '8888:8888' # filer UI/API (browse stored objects)
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
 
 volumes:
   pgdata:
   opensearch-data:
-  minio-data:
+  seaweedfs-data:
