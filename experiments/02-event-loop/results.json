@@ -1,0 +1,299 @@
+{
+  "date": "2026-10-01T19:55:40.486Z",
+  "node": "v24.15.0",
+  "RUNS": 3,
+  "DURATION": 15,
+  "HEAVY_CONN": 4,
+  "LIGHT_CONN": 20,
+  "results": [
+    {
+      "variant": "baseline: 1 process, no heavy load",
+      "lightRps": 5243,
+      "lightP50": 3,
+      "lightP99": 10,
+      "lightP99Range": "9–11",
+      "heavyRps": null,
+      "heavyP99": null,
+      "errors": 0,
+      "peakRssMb": 128
+    },
+    {
+      "variant": "1. one process",
+      "lightRps": 274,
+      "lightP50": 70,
+      "lightP99": 163,
+      "lightP99Range": "102–170",
+      "heavyRps": 40.1,
+      "heavyP99": 264,
+      "errors": 0,
+      "peakRssMb": 109
+    },
+    {
+      "variant": "2. cluster, 1 worker",
+      "lightRps": 222,
+      "lightP50": 81,
+      "lightP99": 210,
+      "lightP99Range": "125–241",
+      "heavyRps": 32.1,
+      "heavyP99": 352,
+      "errors": 0,
+      "peakRssMb": 205
+    },
+    {
+      "variant": "2. cluster, 2 workers",
+      "lightRps": 579,
+      "lightP50": 30,
+      "lightP99": 93,
+      "lightP99Range": "81–100",
+      "heavyRps": 63.7,
+      "heavyP99": 156,
+      "errors": 0,
+      "peakRssMb": 331
+    },
+    {
+      "variant": "2. cluster, 4 workers",
+      "lightRps": 367,
+      "lightP50": 46,
+      "lightP99": 156,
+      "lightP99Range": "107–211",
+      "heavyRps": 61.9,
+      "heavyP99": 143,
+      "errors": 0,
+      "peakRssMb": 565
+    },
+    {
+      "variant": "2. cluster, 4 workers, 1 CPU",
+      "lightRps": 1053,
+      "lightP50": 2,
+      "lightP99": 208,
+      "lightP99Range": "204–273",
+      "heavyRps": 27.8,
+      "heavyP99": 359,
+      "errors": 0,
+      "peakRssMb": 536
+    },
+    {
+      "variant": "3. worker_threads (piscina)",
+      "lightRps": 3577,
+      "lightP50": 4,
+      "lightP99": 17,
+      "lightP99Range": "15–22",
+      "heavyRps": 64.5,
+      "heavyP99": 116,
+      "errors": 0,
+      "peakRssMb": 180
+    }
+  ],
+  "runs": [
+    {
+      "variant": "baseline: 1 process, no heavy load",
+      "lightRps": 5127,
+      "lightP50": 3,
+      "lightP99": 11,
+      "heavyRps": null,
+      "heavyP99": null,
+      "errors": 0,
+      "peakRssMb": 127
+    },
+    {
+      "variant": "baseline: 1 process, no heavy load",
+      "lightRps": 5243,
+      "lightP50": 3,
+      "lightP99": 10,
+      "heavyRps": null,
+      "heavyP99": null,
+      "errors": 0,
+      "peakRssMb": 128
+    },
+    {
+      "variant": "baseline: 1 process, no heavy load",
+      "lightRps": 5500,
+      "lightP50": 3,
+      "lightP99": 9,
+      "heavyRps": null,
+      "heavyP99": null,
+      "errors": 0,
+      "peakRssMb": 128
+    },
+    {
+      "variant": "1. one process",
+      "lightRps": 274,
+      "lightP50": 70,
+      "lightP99": 163,
+      "heavyRps": 40.1,
+      "heavyP99": 264,
+      "errors": 0,
+      "peakRssMb": 121
+    },
+    {
+      "variant": "1. one process",
+      "lightRps": 232,
+      "lightP50": 77,
+      "lightP99": 170,
+      "heavyRps": 36.1,
+      "heavyP99": 304,
+      "errors": 0,
+      "peakRssMb": 105
+    },
+    {
+      "variant": "1. one process",
+      "lightRps": 300,
+      "lightP50": 66,
+      "lightP99": 102,
+      "heavyRps": 44.2,
+      "heavyP99": 175,
+      "errors": 0,
+      "peakRssMb": 109
+    },
+    {
+      "variant": "2. cluster, 1 worker",
+      "lightRps": 274,
+      "lightP50": 72,
+      "lightP99": 125,
+      "heavyRps": 39.5,
+      "heavyP99": 222,
+      "errors": 0,
+      "peakRssMb": 205
+    },
+    {
+      "variant": "2. cluster, 1 worker",
+      "lightRps": 202,
+      "lightP50": 92,
+      "lightP99": 241,
+      "heavyRps": 28.4,
+      "heavyP99": 430,
+      "errors": 0,
+      "peakRssMb": 202
+    },
+    {
+      "variant": "2. cluster, 1 worker",
+      "lightRps": 222,
+      "lightP50": 81,
+      "lightP99": 210,
+      "heavyRps": 32.1,
+      "heavyP99": 352,
+      "errors": 0,
+      "peakRssMb": 207
+    },
+    {
+      "variant": "2. cluster, 2 workers",
+      "lightRps": 532,
+      "lightP50": 35,
+      "lightP99": 81,
+      "heavyRps": 57.3,
+      "heavyP99": 123,
+      "errors": 0,
+      "peakRssMb": 331
+    },
+    {
+      "variant": "2. cluster, 2 workers",
+      "lightRps": 579,
+      "lightP50": 30,
+      "lightP99": 100,
+      "heavyRps": 63.7,
+      "heavyP99": 162,
+      "errors": 0,
+      "peakRssMb": 328
+    },
+    {
+      "variant": "2. cluster, 2 workers",
+      "lightRps": 600,
+      "lightP50": 30,
+      "lightP99": 93,
+      "heavyRps": 64.5,
+      "heavyP99": 156,
+      "errors": 0,
+      "peakRssMb": 335
+    },
+    {
+      "variant": "2. cluster, 4 workers",
+      "lightRps": 367,
+      "lightP50": 46,
+      "lightP99": 211,
+      "heavyRps": 61.9,
+      "heavyP99": 143,
+      "errors": 0,
+      "peakRssMb": 549
+    },
+    {
+      "variant": "2. cluster, 4 workers",
+      "lightRps": 2591,
+      "lightP50": 0,
+      "lightP99": 107,
+      "heavyRps": 52.9,
+      "heavyP99": 176,
+      "errors": 0,
+      "peakRssMb": 573
+    },
+    {
+      "variant": "2. cluster, 4 workers",
+      "lightRps": 345,
+      "lightP50": 53,
+      "lightP99": 156,
+      "heavyRps": 68.6,
+      "heavyP99": 116,
+      "errors": 0,
+      "peakRssMb": 565
+    },
+    {
+      "variant": "2. cluster, 4 workers, 1 CPU",
+      "lightRps": 224,
+      "lightP50": 96,
+      "lightP99": 273,
+      "heavyRps": 32.9,
+      "heavyP99": 315,
+      "errors": 0,
+      "peakRssMb": 524
+    },
+    {
+      "variant": "2. cluster, 4 workers, 1 CPU",
+      "lightRps": 1053,
+      "lightP50": 2,
+      "lightP99": 208,
+      "heavyRps": 27.1,
+      "heavyP99": 425,
+      "errors": 0,
+      "peakRssMb": 536
+    },
+    {
+      "variant": "2. cluster, 4 workers, 1 CPU",
+      "lightRps": 1107,
+      "lightP50": 2,
+      "lightP99": 204,
+      "heavyRps": 27.8,
+      "heavyP99": 359,
+      "errors": 0,
+      "peakRssMb": 548
+    },
+    {
+      "variant": "3. worker_threads (piscina)",
+      "lightRps": 3577,
+      "lightP50": 4,
+      "lightP99": 17,
+      "heavyRps": 64.5,
+      "heavyP99": 116,
+      "errors": 0,
+      "peakRssMb": 180
+    },
+    {
+      "variant": "3. worker_threads (piscina)",
+      "lightRps": 3299,
+      "lightP50": 5,
+      "lightP99": 22,
+      "heavyRps": 61.7,
+      "heavyP99": 123,
+      "errors": 0,
+      "peakRssMb": 184
+    },
+    {
+      "variant": "3. worker_threads (piscina)",
+      "lightRps": 3640,
+      "lightP50": 4,
+      "lightP99": 15,
+      "heavyRps": 64.7,
+      "heavyP99": 102,
+      "errors": 0,
+      "peakRssMb": 180
+    }
+  ]
+}
