@@ -50,6 +50,12 @@ This is the single command that must pass before any work is considered done: it
 
 Tests run against a dedicated `app_test` database, isolated from the `app` database the running app uses. `db:test:ensure` (part of `db:test:up`/`ci`) creates `app_test` if it's missing, so this is safe to run even against a Postgres volume that already existed before `docker/postgres/init/01-create-test-db.sql` was added — that init script only runs on a brand-new volume.
 
+## Домашка 02 — экосистема Node.js
+
+- **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
+- **Шпаргалка**: [docs/cheatsheet.md](docs/cheatsheet.md)
+- **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
+
 ## Migrations
 
 ```bash
