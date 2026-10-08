@@ -1,38 +1,38 @@
-# devin
+# system-design
 
-NestJS backend with Postgres, Redis, OpenSearch and SeaweedFS (S3-compatible storage), running under Docker Compose.
+Бэкенд на NestJS с Postgres, Redis, OpenSearch и SeaweedFS (S3-совместимое хранилище), запускается через Docker Compose.
 
-## Stack and why
+## Стек и почему
 
-- **NestJS, scaffolded via `nest new`** — the Nest CLI generates the standard project layout (`nest-cli.json`, `tsconfig*.json`, `src/app.*`, `test/`) and wires up `nest build`/`nest start` against it, instead of hand-assembling that structure. That's the conventional starting point for a Nest app and what every other Nest developer will recognize.
-- **Express, not Fastify, as the HTTP adapter** — the project uses `@nestjs/platform-express` (`NestFactory.create(AppModule)`), which is Nest's default platform. Fastify (`@nestjs/platform-fastify`, `NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter())`) is a drop-in alternative at the Nest level and is generally faster with a schema-first validation model, but has a smaller ecosystem of ready-made middleware and a less common request/response API for anyone coming from plain Express. Nothing here is latency-sensitive enough to need Fastify's edge, so Express's larger ecosystem and familiarity win.
-- **TypeORM** — official `@nestjs/typeorm` integration, decorator-based entities, CLI-driven migrations (`synchronize: false`; schema only ever changes through a migration).
-- **oxlint, not ESLint** — a Rust-based linter that runs orders of magnitude faster than ESLint and covers the correctness/style rules this project needs (including type-aware checks via `oxlint-tsgolint`), at the cost of ESLint's much larger plugin ecosystem (e.g. framework-specific or highly custom rule sets). For a project this size, the speed is worth the smaller rule surface.
-- **Prettier** — handles formatting only, kept separate from the linter so oxlint's rules stay about correctness, not style debates; `format:check` is the CI gate, `format` is the fix-it command.
-- **Vitest** — native ESM support without extra flags (this project uses `"type": "module"`), fast, and ships `coverage.thresholds` out of the box via `@vitest/coverage-v8`.
-- **pino via `nestjs-pino`** — structured JSON logs (ready to ship to OpenSearch), the fastest logger in the Node ecosystem, replaces Nest's built-in logger; `pino-pretty` is used only when `NODE_ENV=development`.
-- **OpenSearch** instead of Elasticsearch — Apache 2.0 licensed, security plugin is trivial to disable for local/dev use.
-- **SeaweedFS** instead of MinIO — `minio/minio` now requires a Docker Hub login to pull; SeaweedFS's S3 gateway (`chrislusf/seaweedfs`) is a freely pullable, actively maintained S3-compatible alternative.
-- **Node 24 LTS** (`node:24-alpine`) — current Active LTS.
+- **NestJS, созданный через `nest new`** — Nest CLI генерирует стандартную структуру проекта (`nest-cli.json`, `tsconfig*.json`, `src/app.*`, `test/`) и настраивает `nest build`/`nest start`, вместо ручной сборки этой структуры. Это привычная отправная точка для Nest-приложения, знакомая любому Nest-разработчику.
+- **Express, а не Fastify, как HTTP-адаптер** — проект использует `@nestjs/platform-express` (`NestFactory.create(AppModule)`), то есть платформу Nest по умолчанию. Fastify (`@nestjs/platform-fastify`, `NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter())`) на уровне Nest заменяется без переделок и обычно быстрее благодаря валидации по схеме, но экосистема готовых middleware у него меньше, а API запроса и ответа менее привычен тем, кто пришёл с чистого Express. Здесь нет задержек, критичных настолько, чтобы нуждаться в преимуществе Fastify, поэтому выигрывают большая экосистема и знакомство с Express.
+- **TypeORM** — официальная интеграция `@nestjs/typeorm`, сущности на декораторах, миграции через CLI (`synchronize: false`; схема меняется только миграцией).
+- **oxlint, а не ESLint** — линтер на Rust, который работает на порядки быстрее ESLint и покрывает нужные проекту правила корректности и стиля (включая проверки с учётом типов через `oxlint-tsgolint`). Платой за это стала куда меньшая экосистема плагинов ESLint (например, правила для фреймворков или сильно кастомные наборы). Для проекта такого размера скорость важнее.
+- **Prettier** — отвечает только за форматирование и отделён от линтера, чтобы правила oxlint касались корректности, а не споров о стиле; `format:check` — проверка в CI, `format` — команда для исправления.
+- **Vitest** — нативная поддержка ESM без дополнительных флагов (проект использует `"type": "module"`), быстрый, а `coverage.thresholds` идут из коробки вместе с `@vitest/coverage-v8`.
+- **pino через `nestjs-pino`** — структурированные JSON-логи (готовы к отправке в OpenSearch), самый быстрый логгер в экосистеме Node, заменяет встроенный логгер Nest; `pino-pretty` используется только при `NODE_ENV=development`.
+- **OpenSearch** вместо Elasticsearch — лицензия Apache 2.0, плагин безопасности для локальной разработки отключается без усилий.
+- **SeaweedFS** вместо MinIO — `minio/minio` теперь требует входа в Docker Hub для загрузки; S3-шлюз SeaweedFS (`chrislusf/seaweedfs`) свободно скачивается, активно поддерживается и совместим с S3.
+- **Node 24 LTS** (`node:24-alpine`) — текущая Active LTS.
 
-Redis, OpenSearch and SeaweedFS are provisioned in Compose and reachable via env vars from day one; the app doesn't have clients wired up for them yet — those get added when a feature needs them.
+Redis, OpenSearch и SeaweedFS поднимаются в Compose и доступны через переменные окружения с самого начала; клиенты для них в приложении пока не подключены, их добавят, когда они понадобятся какой-нибудь функции.
 
-## Running the stack
+## Запуск стека
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-- App: http://localhost:3000 (`GET /` → `Hello World!`, see `requests.http`)
+- Приложение: http://localhost:3000 (`GET /` → `Hello World!`, см. `requests.http`)
 - Postgres: localhost:5432
 - Redis: localhost:6379
 - OpenSearch: http://localhost:9200
-- SeaweedFS S3 API: http://localhost:8333, filer UI: http://localhost:8888
+- S3 API SeaweedFS: http://localhost:8333, UI filer: http://localhost:8888
 
-`.env.example` is host-oriented (`localhost` for every service), for running the app or the TypeORM CLI directly on the host. The `app` service in `docker-compose.yml` overrides the vars it needs to reach its sibling containers by service name (`postgres`, `redis`, ...) instead.
+`.env.example` рассчитан на хост (для каждого сервиса указан `localhost`), чтобы запускать приложение или TypeORM CLI прямо на хосте. Сервис `app` в `docker-compose.yml` переопределяет нужные переменные, чтобы обращаться к соседним контейнерам по имени сервиса (`postgres`, `redis`, ...).
 
-## Development
+## Разработка
 
 ```bash
 npm install
@@ -40,17 +40,17 @@ docker compose up -d postgres redis opensearch seaweedfs
 npm run start:dev
 ```
 
-## Verification
+## Проверка
 
-Use Docker Compose v2 with support for `up --wait`. If `docker` is a Podman alias, select a compatible Compose provider, for example `PODMAN_COMPOSE_PROVIDER=/path/to/docker-compose-v2 npm run ci`; Compose v1 does not support this check.
+Нужен Docker Compose v2 с поддержкой `up --wait`; Compose v1 эту проверку не поддерживает.
 
 ```bash
 npm run ci
 ```
 
-This is the single command that must pass before any work is considered done: it starts a local Postgres via Docker Compose (bootstrapping `.env` from `.env.example` if it doesn't exist yet, so this works on a fresh clone), then runs type checking, linting, format checking and tests with a 100% coverage gate on lines/branches/functions/statements. See `AGENTS.md` for the rule and rationale, and `vitest.config.ts` for the coverage configuration (including the excluded files, each with a comment explaining why).
+Это единственная команда, которая должна проходить, прежде чем работа считается завершённой: она запускает локальный Postgres через Docker Compose (создаёт `.env` из `.env.example`, если его ещё нет, поэтому работает на свежем клоне), затем выполняет проверку типов, линтинг, проверку форматирования и тесты с порогом покрытия 100% по строкам, ветвям, функциям и операторам. Правило и его обоснование — в `AGENTS.md`, настройки покрытия (включая исключённые файлы, у каждого из которых есть комментарий с причиной) — в `vitest.config.ts`.
 
-Tests run against a dedicated `app_test` database, isolated from the `app` database the running app uses. `db:test:ensure` (part of `db:test:up`/`ci`) creates `app_test` if it's missing, so this is safe to run even against a Postgres volume that already existed before `docker/postgres/init/01-create-test-db.sql` was added — that init script only runs on a brand-new volume.
+Тесты идут на отдельной базе `app_test`, изолированной от базы `app`, с которой работает запущенное приложение. `db:test:ensure` (входит в `db:test:up`/`ci`) создаёт `app_test`, если её нет, поэтому запускать безопасно даже на томе Postgres, который существовал до добавления `docker/postgres/init/01-create-test-db.sql`: этот init-скрипт выполняется только на совершенно новом томе.
 
 ## Домашка 02 — экосистема Node.js
 
@@ -59,10 +59,10 @@ Tests run against a dedicated `app_test` database, isolated from the `app` datab
 - **Системный дизайн**: [docs/cheatsheet-sd.md](docs/cheatsheet-sd.md)
 - **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
 
-## Migrations
+## Миграции
 
 ```bash
-npm run build   # entities/migrations are loaded from dist/, so build first
+npm run build   # сущности и миграции загружаются из dist/, поэтому сначала сборка
 npm run migration:generate -- src/migrations/<Name>
 npm run migration:run
 ```
