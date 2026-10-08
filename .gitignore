@@ -143,3 +143,7 @@ vite.config.ts.timestamp-*
 .vite/
 
 tasks/*
+
+# Local experiment runs; keep the published results.json under version control.
+experiments/**/results.local.json
+experiments/**/results.local.json.tmp

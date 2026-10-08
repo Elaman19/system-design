@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { hash } from './hash.js';
 import { PoolService } from './pool.service.js';
+import { availableParallelism, cpus } from 'node:os';
 
 @Controller()
 export class AppController {
@@ -27,6 +28,16 @@ export class AppController {
   @Get('pid')
   pid() {
     return { pid: process.pid };
+  }
+
+  @Get('runtime')
+  runtime() {
+    return {
+      node: process.version,
+      availableParallelism: availableParallelism(),
+      logicalCpus: cpus().length,
+      pool: this.pool.info(),
+    };
   }
 
   // Simulates a bug: an exception thrown in a timer callback is outside any

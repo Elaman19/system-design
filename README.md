@@ -42,6 +42,8 @@ npm run start:dev
 
 ## Verification
 
+Use Docker Compose v2 with support for `up --wait`. If `docker` is a Podman alias, select a compatible Compose provider, for example `PODMAN_COMPOSE_PROVIDER=/path/to/docker-compose-v2 npm run ci`; Compose v1 does not support this check.
+
 ```bash
 npm run ci
 ```
@@ -54,6 +56,7 @@ Tests run against a dedicated `app_test` database, isolated from the `app` datab
 
 - **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
 - **Шпаргалка**: [docs/cheatsheet.md](docs/cheatsheet.md)
+- **Системный дизайн**: [docs/cheatsheet-sd.md](docs/cheatsheet-sd.md)
 - **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
 
 ## Migrations

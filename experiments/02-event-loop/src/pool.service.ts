@@ -8,6 +8,16 @@ export class PoolService implements OnApplicationShutdown {
   // would add idle threads to their memory numbers.
   private pool?: Piscina<string, string>;
 
+  info() {
+    return this.pool
+      ? {
+          minThreads: this.pool.options.minThreads,
+          maxThreads: this.pool.options.maxThreads,
+          threads: this.pool.threads.length,
+        }
+      : null;
+  }
+
   run(input: string): Promise<string> {
     this.pool ??= new Piscina({
       filename: new URL('./hash.worker.js', import.meta.url).href,
