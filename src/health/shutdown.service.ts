@@ -10,6 +10,8 @@ import { PinoLogger } from 'nestjs-pino';
 import { DataSource } from 'typeorm';
 import { ENV, type Env } from '../config/env.js';
 
+const IDLE_SWEEP_MS = 100;
+
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -39,7 +41,6 @@ export class ShutdownService
   }
 
   async beforeApplicationShutdown(signal?: string) {
-    this.shuttingDown = true;
     this.logger.info(
       { hook: 'beforeApplicationShutdown', signal },
       '/ready now answers 503, draining before closing the listener',
@@ -50,7 +51,14 @@ export class ShutdownService
     const closed = new Promise<void>((resolve) =>
       server.close(() => resolve()),
     );
+    // Keep-alive sockets that were busy at close() turn idle once their last
+    // response is out (with `Connection: close` they close by themselves);
+    // sweeping stops them from holding the server open until the timeout.
     server.closeIdleConnections();
+    const sweep = setInterval(
+      () => server.closeIdleConnections(),
+      IDLE_SWEEP_MS,
+    );
     this.logger.info('listener closed, waiting for in-flight requests');
 
     let timer: NodeJS.Timeout | undefined;
@@ -62,6 +70,7 @@ export class ShutdownService
     ]);
     // A pending timer would keep the event loop (and the container) alive.
     clearTimeout(timer);
+    clearInterval(sweep);
     if (timedOut) {
       this.logger.warn(
         { timeoutMs: this.env.SHUTDOWN_TIMEOUT_MS },

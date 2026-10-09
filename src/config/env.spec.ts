@@ -48,6 +48,15 @@ describe('loadEnv', () => {
     expect(() => loadEnv(rest)).toThrow(/DB_HOST.*DB_NAME/);
   });
 
+  it('validates optional service URLs when present', () => {
+    expect(loadEnv({ ...valid, REDIS_URL: 'redis://r:6379' }).REDIS_URL).toBe(
+      'redis://r:6379',
+    );
+    expect(() => loadEnv({ ...valid, S3_ENDPOINT: 'not a url' })).toThrow(
+      /S3_ENDPOINT/,
+    );
+  });
+
   it('rejects a non-numeric port', () => {
     expect(() => loadEnv({ ...valid, DB_PORT: 'abc' })).toThrow(/DB_PORT/);
   });

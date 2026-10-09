@@ -16,15 +16,22 @@ export function genReqId(req: IncomingMessage, res: ServerResponse): string {
   return id;
 }
 
-export function loggerConfig(env: Env): Params {
+/** Level and transport shared by the request logger and the bootstrap logger. */
+export function baseLogOptions(env: Env) {
   const isDevelopment = env.NODE_ENV === 'development';
 
   return {
+    level: env.LOG_LEVEL ?? (isDevelopment ? 'debug' : 'info'),
+    transport: isDevelopment
+      ? { target: 'pino-pretty', options: { singleLine: true } }
+      : undefined,
+  };
+}
+
+export function loggerConfig(env: Env): Params {
+  return {
     pinoHttp: {
-      level: env.LOG_LEVEL ?? (isDevelopment ? 'debug' : 'info'),
-      transport: isDevelopment
-        ? { target: 'pino-pretty', options: { singleLine: true } }
-        : undefined,
+      ...baseLogOptions(env),
       genReqId,
       redact: ['req.headers.authorization', 'req.headers.cookie'],
       // Probes fire every few seconds; logging them drowns real traffic.

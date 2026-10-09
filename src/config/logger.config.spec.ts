@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Env } from './env.js';
-import { genReqId, loggerConfig } from './logger.config.js';
+import { baseLogOptions, genReqId, loggerConfig } from './logger.config.js';
 
 const env = (over: Partial<Env>) => ({ NODE_ENV: 'test', ...over }) as Env;
 
@@ -35,6 +35,15 @@ describe('loggerConfig', () => {
     expect(ignore({ url: '/ready' })).toBe(true);
     expect(ignore({ url: '/work' })).toBe(false);
     expect(ignore({})).toBe(false);
+  });
+});
+
+describe('baseLogOptions', () => {
+  it('matches what loggerConfig feeds to pino-http', () => {
+    const e = env({ NODE_ENV: 'development', LOG_LEVEL: 'trace' });
+
+    expect(loggerConfig(e).pinoHttp).toMatchObject(baseLogOptions(e));
+    expect(baseLogOptions(e).level).toBe('trace');
   });
 });
 

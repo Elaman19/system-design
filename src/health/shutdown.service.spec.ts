@@ -4,7 +4,7 @@ function setup(opts: { initialized?: boolean; closes?: boolean } = {}) {
   const { initialized = true, closes = true } = opts;
   const server = {
     close: vi.fn((cb: () => void) => {
-      if (closes) setTimeout(cb, 100);
+      if (closes) setTimeout(cb, 250);
     }),
     closeIdleConnections: vi.fn(),
     closeAllConnections: vi.fn(),
@@ -45,8 +45,13 @@ describe('ShutdownService', () => {
     expect(server.close).toHaveBeenCalledOnce();
     expect(server.closeIdleConnections).toHaveBeenCalledOnce();
 
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(250);
     await done;
+    // the sweep repeats while waiting for the listener and stops afterwards
+    const sweeps = server.closeIdleConnections.mock.calls.length;
+    expect(sweeps).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.closeIdleConnections).toHaveBeenCalledTimes(sweeps);
     expect(server.closeAllConnections).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
   });

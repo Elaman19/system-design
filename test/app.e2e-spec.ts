@@ -100,6 +100,51 @@ describe('graceful shutdown (e2e)', () => {
     });
   });
 
+  it('does not cut off a keep-alive client that keeps sending requests', async () => {
+    const app = await createApp();
+    await app.listen(0, '127.0.0.1');
+    const { port } = app.getHttpServer().address() as AddressInfo;
+
+    // One reused socket, like a balancer: the server never sees it go idle.
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const stats = { ok: 0, broken: 0 };
+    let stop = false;
+    const loop = (async () => {
+      while (!stop) {
+        await new Promise<void>((resolve) => {
+          http
+            .get(
+              { host: '127.0.0.1', port, path: '/work?ms=200', agent },
+              (res) => {
+                res.resume();
+                res.on('end', () => {
+                  if (res.statusCode === 200) stats.ok++;
+                  else stats.broken++;
+                  resolve();
+                });
+              },
+            )
+            .on('error', (err: NodeJS.ErrnoException) => {
+              if (err.code !== 'ECONNREFUSED') stats.broken++;
+              stop = true;
+              resolve();
+            });
+        });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 500));
+    const started = Date.now();
+    await app.close();
+    await loop;
+    agent.destroy();
+
+    expect(stats.broken).toBe(0);
+    expect(stats.ok).toBeGreaterThan(0);
+    // closes on its own, not by hitting SHUTDOWN_TIMEOUT_MS (2000 in tests)
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
   it('answers /ready with 503 naming "shutdown" during the drain', async () => {
     const app = await createApp();
     app.get(ShutdownService).onModuleDestroy();

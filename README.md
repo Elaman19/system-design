@@ -60,7 +60,7 @@ npm run ci
 - **`GET /live`** — liveness, без зависимостей. **`GET /ready`** — readiness на `@nestjs/terminus`: пинг Postgres с таймаутом `HEALTH_TIMEOUT_MS` и индикатор `shutdown`. `healthcheck` в `docker-compose.yml` вызывает `/ready`. Compose не перезапускает unhealthy-контейнер: при падении базы приложение становится `unhealthy`, а когда база вернулась — снова `healthy`, без рестарта.
 - **Graceful shutdown** (`src/health/shutdown.service.ts`), порядок хуков Nest: `onModuleDestroy` → `beforeApplicationShutdown(SIGTERM)` → закрытие HTTP-сервера → `onApplicationShutdown`.
   1. `onModuleDestroy` ставит флаг — `/ready` сразу отвечает 503; `beforeApplicationShutdown` ждёт `SHUTDOWN_DRAIN_MS`, чтобы балансировщик снял трафик (остальные запросы ещё обслуживаются);
-  2. закрываем listener (новые соединения не принимаются), ждём текущие запросы до `SHUTDOWN_TIMEOUT_MS`, затем принудительно рвём оставшиеся;
+  2. закрываем listener (новые соединения не принимаются), ждём текущие запросы до `SHUTDOWN_TIMEOUT_MS`, затем принудительно рвём оставшиеся. Keep-alive: с начала shutdown каждый ответ уходит с `Connection: close` (`connection-close.middleware.ts`), а простаивающие сокеты закрываются периодически — иначе клиент, который шлёт запросы по одному сокету, держал бы сервер открытым до таймаута и получил бы обрыв;
   3. `onApplicationShutdown`: закрываем соединения с базой — только после ответа на последний запрос. `TypeOrmCoreModule` делает то же самое в своём хуке; наш хук нужен ради явного лога и идемпотентен (`isInitialized`).
 
   `stop_grace_period` в compose (30s) должен быть больше `SHUTDOWN_DRAIN_MS + SHUTDOWN_TIMEOUT_MS`.
@@ -79,18 +79,25 @@ docker compose start postgres
 docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app)   # не менялось
 
 # graceful shutdown под нагрузкой: ни одного оборванного запроса
-node scripts/load.mjs http://localhost:3000 5 &
+node scripts/load.mjs http://localhost:3000 5 &   # по умолчанию keep-alive, как у балансировщика; 4-й аргумент `fresh` — новое соединение на запрос
 docker compose stop app
 docker compose logs app | grep ShutdownService   # какие хуки и в каком порядке
 ```
 
-`GET /work` включается `WORK_ENDPOINT_ENABLED=true` (в `.env.example` и compose включён; по умолчанию выключен — 404). Каждый запрос держит соединение из пула pg (по умолчанию 10), поэтому в `scripts/load.mjs` держите concurrency ниже размера пула, иначе `/ready` может упереться в `HEALTH_TIMEOUT_MS`. Скрипт завершается с кодом 1, если хоть один запрос завершился любой ошибкой кроме ECONNREFUSED (в т.ч. ECONNRESET), получил не-2xx или ни один запрос не прошёл успешно. Docker-прокси портов может сбрасывать соединения после закрытия listener — для строгой проверки запускайте скрипт против приложения напрямую.
+`GET /work` включается `WORK_ENDPOINT_ENABLED=true` (в `.env.example` выключен, в compose включён только для локального стека; выключен — 404). Каждый запрос держит соединение из пула pg (по умолчанию 10), поэтому в `scripts/load.mjs` держите concurrency ниже размера пула, иначе `/ready` может упереться в `HEALTH_TIMEOUT_MS`. Скрипт работает по keep-alive (как балансировщик), режим `fresh` — новое соединение на запрос. Завершается с кодом 1, если хоть один запрос завершился любой ошибкой кроме ECONNREFUSED (в т.ч. ECONNRESET), получил не-2xx или ни один запрос не прошёл успешно. Docker-прокси портов может сбрасывать соединения после закрытия listener — для строгой проверки запускайте скрипт против приложения напрямую.
+
+## Архитектура (C4)
+
+- [Уровень 1 — System Context](<docs/architecture/L1 - System Context.drawio.svg>)
+- [Уровень 2 — Containers](<docs/architecture/L2 - Containers.drawio.svg>)
+
+![Containers](<docs/architecture/L2 - Containers.drawio.svg>)
 
 ## Домашка 02 — экосистема Node.js
 
 - **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
-- **Шпаргалка**: [docs/cheatsheet.md](docs/cheatsheet.md)
-- **Системный дизайн**: [docs/cheatsheet-sd.md](docs/cheatsheet-sd.md)
+- **Шпаргалка**: [docs/cheatsheet/node.js.md](docs/cheatsheet/node.js.md)
+- **Системный дизайн**: [docs/cheatsheet/system-design.md](docs/cheatsheet/system-design.md)
 - **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
 
 ## Миграции

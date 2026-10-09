@@ -1,5 +1,7 @@
-// Usage: node scripts/load.mjs [url] [concurrency]
-// Sends /work requests over fresh connections until the server goes away.
+// Usage: node scripts/load.mjs [url] [concurrency] [keepalive|fresh]
+// Sends /work requests until the server goes away. Default mode "keepalive"
+// reuses sockets like a balancer does (the case where server.close() alone
+// never finishes); "fresh" opens a new connection per request.
 // Exit code 1 if any request was cut off mid-flight (ECONNRESET etc.) or
 // answered with a non-2xx status (e.g. 500 because the DB closed too early).
 // Only ECONNREFUSED after the first response counts as "server is gone"; any
@@ -10,13 +12,17 @@ import http from 'node:http';
 
 const base = process.argv[2] ?? 'http://localhost:3000';
 const concurrency = Number(process.argv[3] ?? 5);
+const keepAlive = (process.argv[4] ?? 'keepalive') !== 'fresh';
+const agent = keepAlive
+  ? new http.Agent({ keepAlive: true, maxSockets: concurrency })
+  : false;
 const stats = { ok: 0, non2xx: 0, refused: 0, broken: 0 };
 let stopping = false;
 const started = () => stats.ok + stats.non2xx > 0;
 
 function once() {
   return new Promise((resolve) => {
-    const req = http.get(`${base}/work?ms=1000`, { agent: false }, (res) => {
+    const req = http.get(`${base}/work?ms=1000`, { agent }, (res) => {
       res.resume();
       res.on('end', () => {
         res.statusCode < 300 ? stats.ok++ : stats.non2xx++;
