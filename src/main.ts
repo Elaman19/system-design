@@ -1,8 +1,11 @@
-import 'dotenv/config';
+import { config } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { loadEnv } from './config/env.js';
+
+// quiet: dotenv's banner is unstructured text; stdout must stay JSON-only.
+config({ quiet: true });
 
 async function bootstrap() {
   // Fail fast: validate config before anything connects or listens.
@@ -10,7 +13,7 @@ async function bootstrap() {
   try {
     env = loadEnv();
   } catch (error) {
-    console.error(
+    console.log(
       JSON.stringify({ level: 'fatal', msg: (error as Error).message }),
     );
     process.exit(1);
