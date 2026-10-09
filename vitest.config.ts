@@ -41,10 +41,14 @@ export default defineConfig({
     include: ['src/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
     env: {
       NODE_ENV: 'test',
+      PORT: exampleEnv.PORT,
       DB_HOST: 'localhost', // tests run on the host, not inside the Compose network
       DB_PORT: exampleEnv.DB_PORT,
       DB_USER: exampleEnv.DB_USER,
       DB_PASSWORD: exampleEnv.DB_PASSWORD,
+      WORK_ENDPOINT_ENABLED: 'true',
+      SHUTDOWN_DRAIN_MS: '0', // no balancer to wait for in tests
+      SHUTDOWN_TIMEOUT_MS: '2000',
       DB_NAME: 'app_test', // isolated from the app's own database, see AGENTS.md
     },
     coverage: {

@@ -1,16 +1,12 @@
-import { loggerConfig } from './logger.config.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Env } from './env.js';
+import { genReqId, loggerConfig } from './logger.config.js';
+
+const env = (over: Partial<Env>) => ({ NODE_ENV: 'test', ...over }) as Env;
 
 describe('loggerConfig', () => {
-  const env = { ...process.env };
-
-  afterEach(() => {
-    process.env = { ...env };
-  });
-
   it('uses pretty transport and debug level in development', () => {
-    process.env.NODE_ENV = 'development';
-
-    const config = loggerConfig();
+    const config = loggerConfig(env({ NODE_ENV: 'development' }));
 
     expect(config.pinoHttp).toMatchObject({
       level: 'debug',
@@ -18,14 +14,58 @@ describe('loggerConfig', () => {
     });
   });
 
-  it('disables pretty transport and uses info level otherwise', () => {
-    process.env.NODE_ENV = 'test';
-
-    const config = loggerConfig();
-
-    expect(config.pinoHttp).toMatchObject({
+  it('uses info level and no transport otherwise', () => {
+    expect(loggerConfig(env({})).pinoHttp).toMatchObject({
       level: 'info',
       transport: undefined,
     });
   });
+
+  it('lets LOG_LEVEL override the default', () => {
+    expect(loggerConfig(env({ LOG_LEVEL: 'warn' })).pinoHttp).toMatchObject({
+      level: 'warn',
+    });
+  });
+
+  it('does not log probe requests', () => {
+    const { autoLogging } = loggerConfig(env({})).pinoHttp as any;
+    const ignore = autoLogging.ignore;
+
+    expect(ignore({ url: '/live' })).toBe(true);
+    expect(ignore({ url: '/ready' })).toBe(true);
+    expect(ignore({ url: '/work' })).toBe(false);
+    expect(ignore({})).toBe(false);
+  });
+});
+
+describe('genReqId', () => {
+  const res = () => {
+    const headers: Record<string, string> = {};
+    return {
+      headers,
+      setHeader: (k: string, v: string) => void (headers[k] = v),
+    };
+  };
+  const req = (id?: string | string[]) =>
+    ({ headers: { 'x-request-id': id } }) as unknown as IncomingMessage;
+
+  it('reuses a valid incoming x-request-id and echoes it', () => {
+    const r = res();
+
+    expect(genReqId(req('abc-123'), r as unknown as ServerResponse)).toBe(
+      'abc-123',
+    );
+    expect(r.headers['x-request-id']).toBe('abc-123');
+  });
+
+  it.each([undefined, 'bad id!', 'x'.repeat(200), ['a', 'b']])(
+    'generates a uuid for %j',
+    (incoming) => {
+      const r = res();
+      const id = genReqId(req(incoming), r as unknown as ServerResponse);
+
+      expect(id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(r.headers['x-request-id']).toBe(id);
+    },
+  );
 });

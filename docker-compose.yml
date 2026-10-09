@@ -2,7 +2,7 @@ services:
   app:
     build: .
     ports:
-      - '3000:3000'
+      - '${PORT:-3000}:${PORT:-3000}'
     env_file: .env
     environment:
       # .env is host-oriented (see .env.example) for `npm run start:dev` and the
@@ -12,10 +12,24 @@ services:
       # - This container runs the built production artifact (Dockerfile strips
       #   devDependencies, incl. pino-pretty), so it must run as production.
       NODE_ENV: production
+      # Local stack only: lets scripts/load.mjs exercise graceful shutdown.
+      WORK_ENDPOINT_ENABLED: 'true'
       DB_HOST: postgres
       REDIS_URL: redis://redis:6379
       OPENSEARCH_URL: http://opensearch:9200
       S3_ENDPOINT: http://seaweedfs:8333
+    # /ready (not /live): the container is "healthy" only while it can serve
+    # traffic. Compose never restarts an unhealthy container by itself, so a
+    # dependency outage flips health without a restart.
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:$${PORT}/ready || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # Must exceed SHUTDOWN_DRAIN_MS + SHUTDOWN_TIMEOUT_MS, else SIGKILL cuts
+    # off the graceful shutdown.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy

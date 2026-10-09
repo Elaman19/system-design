@@ -5,3 +5,12 @@ GET http://localhost:3000/
 # Content-Type: text/html; charset=utf-8
 #
 # Hello World!
+
+### Liveness
+GET http://localhost:3000/live
+
+### Readiness (503 while shutting down or a dependency is down)
+GET http://localhost:3000/ready
+
+### Slow request holding a DB connection (max 5000 ms)
+GET http://localhost:3000/work?ms=500

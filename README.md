@@ -52,6 +52,40 @@ npm run ci
 
 Тесты идут на отдельной базе `app_test`, изолированной от базы `app`, с которой работает запущенное приложение. `db:test:ensure` (входит в `db:test:up`/`ci`) создаёт `app_test`, если её нет, поэтому запускать безопасно даже на томе Postgres, который существовал до добавления `docker/postgres/init/01-create-test-db.sql`: этот init-скрипт выполняется только на совершенно новом томе.
 
+## Cloud native / 12factor
+
+Контейнер одноразовый: платформа гасит и поднимает его когда хочет.
+
+- **Конфиг** — только из переменных окружения, схема на zod в `src/config/env.ts` проверяется при старте (`main.ts`). Не хватает обязательной переменной — приложение пишет одну JSON-строку `fatal` с именами полей и завершается с кодом 1, не поднимая Nest. В репозитории только `.env.example`.
+- **`GET /live`** — liveness, без зависимостей. **`GET /ready`** — readiness на `@nestjs/terminus`: пинг Postgres с таймаутом `HEALTH_TIMEOUT_MS` и индикатор `shutdown`. `healthcheck` в `docker-compose.yml` вызывает `/ready`. Compose не перезапускает unhealthy-контейнер: при падении базы приложение становится `unhealthy`, а когда база вернулась — снова `healthy`, без рестарта.
+- **Graceful shutdown** (`src/health/shutdown.service.ts`), порядок хуков Nest: `onModuleDestroy` → `beforeApplicationShutdown(SIGTERM)` → закрытие HTTP-сервера → `onApplicationShutdown`.
+  1. `onModuleDestroy` ставит флаг — `/ready` сразу отвечает 503; `beforeApplicationShutdown` ждёт `SHUTDOWN_DRAIN_MS`, чтобы балансировщик снял трафик (остальные запросы ещё обслуживаются);
+  2. закрываем listener (новые соединения не принимаются), ждём текущие запросы до `SHUTDOWN_TIMEOUT_MS`, затем принудительно рвём оставшиеся;
+  3. `onApplicationShutdown`: закрываем соединения с базой — только после ответа на последний запрос. `TypeOrmCoreModule` делает то же самое в своём хуке; наш хук нужен ради явного лога и идемпотентен (`isInitialized`).
+
+  `stop_grace_period` в compose (30s) должен быть больше `SHUTDOWN_DRAIN_MS + SHUTDOWN_TIMEOUT_MS`.
+
+- **Логи** — pino, JSON в stdout, у каждого запроса `req.id` (берётся из входящего `x-request-id` или генерируется, возвращается в заголовке ответа). Пробы `/live` и `/ready` не логируются.
+
+### Проверка руками
+
+```bash
+docker compose up -d --build
+
+# зависимость упала и вернулась: /ready 503 с именем database, /live 200, без рестарта
+docker compose stop postgres
+curl -i localhost:3000/ready; curl -i localhost:3000/live
+docker compose start postgres
+docker inspect -f '{{.State.StartedAt}}' $(docker compose ps -q app)   # не менялось
+
+# graceful shutdown под нагрузкой: ни одного оборванного запроса
+node scripts/load.mjs http://localhost:3000 5 &
+docker compose stop app
+docker compose logs app | grep ShutdownService   # какие хуки и в каком порядке
+```
+
+`GET /work` включается `WORK_ENDPOINT_ENABLED=true` (в `.env.example` и compose включён; по умолчанию выключен — 404). Каждый запрос держит соединение из пула pg (по умолчанию 10), поэтому в `scripts/load.mjs` держите concurrency ниже размера пула, иначе `/ready` может упереться в `HEALTH_TIMEOUT_MS`. Скрипт завершается с кодом 1, если хоть один запрос оборвался на полуслове или получил не-2xx.
+
 ## Домашка 02 — экосистема Node.js
 
 - **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
