@@ -18,7 +18,9 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
-  app.enableShutdownHooks();
+  // useProcessExit: exit via process.exit() so pino flushes the last hook logs
+  // (the default re-raises the signal and can drop buffered stdout).
+  app.enableShutdownHooks(undefined, { useProcessExit: true });
   await app.listen(env.PORT);
 }
 await bootstrap();

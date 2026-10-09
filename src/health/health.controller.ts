@@ -1,8 +1,12 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Inject,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import {
   HealthCheck,
   HealthCheckService,
-  HealthIndicatorService,
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 import { ENV, type Env } from '../config/env.js';
@@ -13,7 +17,6 @@ export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly db: TypeOrmHealthIndicator,
-    private readonly indicators: HealthIndicatorService,
     private readonly shutdown: ShutdownService,
     @Inject(ENV) private readonly env: Env,
   ) {}
@@ -29,13 +32,18 @@ export class HealthController {
   @Get('ready')
   @HealthCheck()
   ready() {
+    // Answer 503 immediately: no dependency check (which may wait on a busy
+    // pool) once shutdown has started.
+    if (this.shutdown.isShuttingDown) {
+      const down = { status: 'down', message: 'shutting down' };
+      throw new ServiceUnavailableException({
+        status: 'error',
+        info: {},
+        error: { shutdown: down },
+        details: { shutdown: down },
+      });
+    }
     return this.health.check([
-      () => {
-        const indicator = this.indicators.check('shutdown');
-        return this.shutdown.isShuttingDown
-          ? indicator.down({ message: 'shutting down' })
-          : indicator.up();
-      },
       () =>
         this.db.pingCheck('database', { timeout: this.env.HEALTH_TIMEOUT_MS }),
     ]);

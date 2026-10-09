@@ -11,7 +11,10 @@ const base = process.argv[2] ?? 'http://localhost:3000';
 const concurrency = Number(process.argv[3] ?? 5);
 const stats = { ok: 0, non2xx: 0, refused: 0, broken: 0 };
 let stopping = false;
+// Reset right after connect is how Docker's port proxy rejects once the
+// listener is gone; only ECONNRESET counts, and only once load has started.
 const REJECTED_WITHIN_MS = 200;
+const started = () => stats.ok + stats.non2xx > 0;
 
 function once() {
   return new Promise((resolve) => {
@@ -29,13 +32,16 @@ function once() {
     });
     req.on('error', (err) => {
       if (
-        err.code === 'ECONNREFUSED' ||
-        Date.now() - startedAt < REJECTED_WITHIN_MS
+        started() &&
+        (err.code === 'ECONNREFUSED' ||
+          (err.code === 'ECONNRESET' &&
+            Date.now() - startedAt < REJECTED_WITHIN_MS))
       ) {
         stats.refused++;
         stopping = true;
       } else {
         stats.broken++;
+        stopping = true;
         console.error('cut off mid-flight:', err.code ?? err.message);
       }
       resolve();
@@ -49,4 +55,8 @@ async function worker() {
 
 await Promise.all(Array.from({ length: concurrency }, worker));
 console.log(JSON.stringify(stats));
+if (stats.ok === 0) {
+  console.error('no request succeeded: load never started (server down?)');
+  process.exit(1);
+}
 process.exit(stats.broken > 0 || stats.non2xx > 0 ? 1 : 0);
