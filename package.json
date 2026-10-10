@@ -22,7 +22,7 @@
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "db:test:up": "cp -n .env.example .env && docker compose up -d --wait postgres && npm run db:test:ensure",
-    "db:test:ensure": "docker compose exec -T postgres psql -U app -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname='app_test'\" | grep -q 1 || docker compose exec -T postgres psql -U app -d postgres -c \"CREATE DATABASE app_test\"",
+    "db:test:ensure": "sh scripts/db-test-ensure.sh",
     "migration:generate": "typeorm-ts-node-esm migration:generate -d src/data-source.ts",
     "migration:run": "typeorm-ts-node-esm migration:run -d src/data-source.ts",
     "ci": "npm run db:test:up && npm run typecheck && npm run lint && npm run format:check && npm run test:cov"

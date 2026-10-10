@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { defineConfig, type Plugin } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -27,9 +27,12 @@ function stripDecoratorMetadataGuard(): Plugin {
 }
 
 // DB_USER/DB_PASSWORD/DB_PORT must match whatever Compose actually starts Postgres
-// with, so read them from .env.example (checked in, always present) instead of
-// duplicating literals that could silently drift out of sync.
-const exampleEnv = parse(readFileSync(new URL('.env.example', import.meta.url)));
+// with. Compose reads .env, so read the same file; fall back to .env.example
+// (checked in) when .env is absent. `db:test:up` creates .env before tests run.
+const envUrl = new URL('.env', import.meta.url);
+const exampleEnv = parse(
+  readFileSync(existsSync(envUrl) ? envUrl : new URL('.env.example', import.meta.url)),
+);
 
 export default defineConfig({
   // Resolves the path aliases declared in tsconfig.json, including the ones
