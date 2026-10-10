@@ -52,7 +52,37 @@ npm run ci
 
 Тесты идут на отдельной базе `app_test`, изолированной от базы `app`, с которой работает запущенное приложение. `db:test:ensure` (входит в `db:test:up`/`ci`) создаёт `app_test`, если её нет, поэтому запускать безопасно даже на томе Postgres, который существовал до добавления `docker/postgres/init/01-create-test-db.sql`: этот init-скрипт выполняется только на совершенно новом томе.
 
-## Cloud native / 12factor
+## Миграции
+
+```bash
+npm run build   # сущности и миграции загружаются из dist/, поэтому сначала сборка
+npm run migration:generate -- src/migrations/<Name>
+npm run migration:run
+```
+
+## Домашка 02 — экосистема Node.js
+
+- **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
+- **Шпаргалка**: [docs/cheatsheet/node.js.md](docs/cheatsheet/node.js.md)
+- **Системный дизайн**: [docs/cheatsheet/system-design.md](docs/cheatsheet/system-design.md)
+- **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
+
+## Домашка 03 — cloud native архитектура
+
+Задание: [tasks/03 - Cloud native архитектура.md](<tasks/03 - Cloud native архитектура.md>).
+
+### Что добавлено
+
+- **Конфиг по 12factor** — схема zod, проверка при старте, `.env.example` в репозитории (`src/config/env.ts`).
+- **Health-checks** `/live` и `/ready` на `@nestjs/terminus`; `healthcheck` в `docker-compose.yml` вызывает `/ready` (`src/health/`).
+- **Graceful shutdown** — `enableShutdownHooks`, хуки Nest, пауза для балансировщика, ожидание запросов с таймаутом, закрытие базы; ответы с `Connection: close` на время остановки, чтобы keep-alive клиенты не получали обрыв.
+- **Структурированные логи** — pino, JSON в stdout, request id; в том же формате логируются старт и ошибки запуска (`src/config/nest-logger.ts`).
+- **Нагрузочный скрипт** `scripts/load.mjs` для проверки остановки под нагрузкой (keep-alive и `fresh` режимы).
+- **Диаграммы C4** (Context и Containers) в `docs/architecture/`.
+- **Системный дизайн сквозного кейса** — карта роста, таблицы компонентов и сигналов, сценарии в `docs/system-design/marketplace-v1/`.
+- **Тесты и CI** — 100% покрытие, включая e2e остановки с keep-alive клиентом и проверку `stop_grace_period` в compose.
+
+### Проект: cloud native по 12factor
 
 Контейнер одноразовый: платформа гасит и поднимает его когда хочет.
 
@@ -67,7 +97,7 @@ npm run ci
 
 - **Логи** — pino, JSON в stdout, у каждого запроса `req.id` (берётся из входящего `x-request-id` или генерируется, возвращается в заголовке ответа). Пробы `/live` и `/ready` не логируются.
 
-### Проверка руками
+#### Проверка руками
 
 ```bash
 docker compose up -d --build
@@ -86,24 +116,36 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 
 `GET /work` включается `WORK_ENDPOINT_ENABLED=true` (в `.env.example` выключен, в compose включён только для локального стека; выключен — 404). Каждый запрос держит соединение из пула pg (по умолчанию 10), поэтому в `scripts/load.mjs` держите concurrency ниже размера пула, иначе `/ready` может упереться в `HEALTH_TIMEOUT_MS`. Скрипт работает по keep-alive (как балансировщик), режим `fresh` — новое соединение на запрос. Завершается с кодом 1, если хоть один запрос завершился любой ошибкой кроме ECONNREFUSED (в т.ч. ECONNRESET), получил не-2xx или ни один запрос не прошёл успешно. Docker-прокси портов может сбрасывать соединения после закрытия listener — для строгой проверки запускайте скрипт против приложения напрямую.
 
-## Архитектура (C4)
+### Архитектурные диаграммы (C4)
 
 - [Уровень 1 — System Context](<docs/architecture/L1 - System Context.drawio.svg>)
 - [Уровень 2 — Containers](<docs/architecture/L2 - Containers.drawio.svg>)
 
 ![Containers](<docs/architecture/L2 - Containers.drawio.svg>)
 
-## Домашка 02 — экосистема Node.js
+### Системный дизайн: площадка (карта роста)
 
-- **Презентация** «Node.js vs Java»: https://claude.ai/artifact/PEHouDxMP8BRYrUsCc9anV
-- **Шпаргалка**: [docs/cheatsheet/node.js.md](docs/cheatsheet/node.js.md)
-- **Системный дизайн**: [docs/cheatsheet/system-design.md](docs/cheatsheet/system-design.md)
-- **Эксперимент** (один процесс / `cluster` / `worker_threads`): [experiments/02-event-loop](experiments/02-event-loop)
+Сквозной кейс, версия 1: [docs/system-design/marketplace-v1/](docs/system-design/marketplace-v1/README.md) - карта роста по зонам, компоненты, сигналы роста и сценарии.
 
-## Миграции
+![Карта роста](docs/system-design/marketplace-v1/growth-map.drawio.svg)
 
-```bash
-npm run build   # сущности и миграции загружаются из dist/, поэтому сначала сборка
-npm run migration:generate -- src/migrations/<Name>
-npm run migration:run
-```
+### Заметка о ревью
+
+Ревью агентом-критиком провёл в новых сессиях с чистым контекстом; каждую находку проверил отдельно.
+
+| Находка                                                                                                                                                                       | Серьёзность      | Что сделал                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Последние shutdown-логи терялись при SIGTERM (pino не успевал сбросить буфер)                                                                                                 | P2               | исправлено: `enableShutdownHooks(undefined, { useProcessExit: true })`                                                                      |
+| `/ready` при shutdown ждал проверку базы (до 1,5 с при занятом пуле)                                                                                                          | P2               | исправлено: при флаге shutdown сразу 503, без проверок зависимостей                                                                         |
+| Нагрузочный скрипт мог ложно проходить (ECONNRESET списывался на «сервер ушёл», нет подтверждения начала нагрузки)                                                            | P2               | исправлено: учитывается только ECONNREFUSED после первого ответа, без успешных запросов - код 1                                             |
+| dotenv печатал неструктурированный баннер, ошибка конфига шла в stderr через `console.error`                                                                                  | P2               | исправлено: `quiet: true`, fatal пишется JSON в stdout                                                                                      |
+| Keep-alive: `server.close()` не завершается, пока клиент шлёт запросы по одному сокету, затем `closeAllConnections()` рвёт запрос                                             | P1               | исправлено: `Connection: close` на ответах во время остановки и периодическая очистка простаивающих сокетов; e2e-тест с keep-alive клиентом |
+| Скрипт нагрузки ходил только по новым соединениям и не ловил keep-alive сценарий                                                                                              | P1               | исправлено: режим keep-alive по умолчанию, `fresh` по желанию                                                                               |
+| Логи Nest и TypeORM при старте шли цветным текстом, а не JSON                                                                                                                 | P2               | исправлено: pino-адаптер для логгера Nest, ошибка запуска логируется как `fatal`                                                            |
+| Fatal конфига был не в формате pino (уровень строкой, без `time`/`pid`)                                                                                                       | P2               | исправлено: `pino().fatal(...)`                                                                                                             |
+| Битые ссылки на шпаргалки, нет ссылок на диаграммы в README                                                                                                                   | P2               | исправлено                                                                                                                                  |
+| `WORK_ENDPOINT_ENABLED=true` в `.env.example`; переменные Redis/OpenSearch/S3 не проверялись схемой; `stop_grace_period` нигде не сверялся с таймингами; лишняя строка в хуке | мелкие           | исправлено: `false` в шаблоне, необязательные URL в схеме, тест на тайминги, строка убрана                                                  |
+| `loadEnv()` вызывается дважды (в `main.ts` и в `EnvModule`)                                                                                                                   | мелкая           | **не согласен**: функция чистая и дешёвая, а передача `env` через `AppModule` ломает e2e-тесты, которые собирают модуль напрямую            |
+| Диаграммы: Docker Engine нарисован внешней системой; имя «Equipment Marketplace» не совпадает с заголовком; подпись стрелки клиента упоминала `/live` и `/ready`              | средние и мелкая | исправлено: платформа убрана с C4-схем, имя `system-design`, подпись `JSON/HTTP`                                                            |
+| Диаграммы: Person описан как «разработчик или скрипт»; глагол «читает/пишет» у стрелки app - postgres; упоминание `app_test` в описании Postgres                              | мелкие           | пока не исправлено                                                                                                                          |
+| Нет системного дизайна с картой роста площадки                                                                                                                                | высокая          | исправлено: `docs/system-design/marketplace-v1/`                                                                                            |
