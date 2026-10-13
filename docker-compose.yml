@@ -31,6 +31,8 @@ services:
     # off the graceful shutdown.
     stop_grace_period: 30s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -38,6 +40,29 @@ services:
       opensearch:
         condition: service_healthy
       seaweedfs:
+        condition: service_healthy
+
+  # Schema changes are a separate step, not something the app does on startup:
+  # a one-shot job from the same image, applied before `app` starts. Re-running
+  # it is safe (already-applied migrations are skipped). CI does the same
+  # against an empty app_test database, see `npm run db:test:migrate`.
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+    command:
+      [
+        'node',
+        'node_modules/typeorm/cli.js',
+        'migration:run',
+        '-d',
+        'dist/data-source.js',
+      ]
+    restart: 'no'
+    depends_on:
+      postgres:
         condition: service_healthy
 
   postgres:

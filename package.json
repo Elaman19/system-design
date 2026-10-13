@@ -21,10 +21,12 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "db:test:up": "cp -n .env.example .env && docker compose up -d --wait postgres && npm run db:test:ensure",
-    "db:test:ensure": "sh scripts/db-test-ensure.sh",
-    "migration:generate": "typeorm-ts-node-esm migration:generate -d src/data-source.ts",
-    "migration:run": "typeorm-ts-node-esm migration:run -d src/data-source.ts",
+    "db:test:up": "cp -n .env.example .env && docker compose up -d --wait postgres && npm run db:test:reset && npm run db:test:migrate",
+    "db:test:reset": "sh scripts/db-test-reset.sh",
+    "db:test:migrate": "npm run build && DB_HOST=localhost DB_NAME=app_test typeorm migration:run -d dist/data-source.js",
+    "migration:revert": "typeorm migration:revert -d dist/data-source.js",
+    "migration:generate": "typeorm migration:generate -d dist/data-source.js",
+    "migration:run": "typeorm migration:run -d dist/data-source.js",
     "ci": "npm run db:test:up && npm run typecheck && npm run lint && npm run format:check && npm run test:cov"
   },
   "dependencies": {

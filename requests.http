@@ -14,3 +14,48 @@ GET http://localhost:3000/ready
 
 ### Slow request holding a DB connection (max 5000 ms)
 GET http://localhost:3000/work?ms=500
+
+### Marketplace: a company (also creates its wallet). Duplicate e-mail, any case -> 409
+# @name seller
+POST http://localhost:3000/companies
+Content-Type: application/json
+
+{ "name": "ООО Продавец", "email": "seller@example.com" }
+
+###
+# @name buyer
+POST http://localhost:3000/companies
+Content-Type: application/json
+
+{ "name": "ООО Покупатель", "email": "buyer@example.com" }
+
+### Administrator credits the wallet by a bank notification. Same notification again -> 409
+POST http://localhost:3000/companies/{{buyer.response.body.id}}/wallet/deposits
+Content-Type: application/json
+
+{ "bankNotificationId": "BN-2026-0001", "amount": 30000000 }
+
+### Seller publishes a lot (prices in cents)
+# @name lot
+POST http://localhost:3000/lots
+Content-Type: application/json
+
+{ "sellerId": "{{seller.response.body.id}}", "title": "Токарный станок", "price": 25000000, "stock": 1, "deliveryMethods": ["pickup", "freight"] }
+
+###
+PATCH http://localhost:3000/lots/{{lot.response.body.id}}/publication
+Content-Type: application/json
+
+{ "published": true }
+
+### Price change (new price and a history row, in one transaction)
+PATCH http://localhost:3000/lots/{{lot.response.body.id}}/price
+Content-Type: application/json
+
+{ "price": 26000000 }
+
+### Purchase (FOR UPDATE on the lot and both wallets). Out of stock / no funds -> 409
+POST http://localhost:3000/deals
+Content-Type: application/json
+
+{ "buyerId": "{{buyer.response.body.id}}", "lotId": "{{lot.response.body.id}}", "quantity": 1 }
