@@ -92,8 +92,9 @@ export async function seedLot(
 }
 
 export const balanceOf = async (h: Harness, companyId: string) =>
-  (await h.http().get(`/companies/${companyId}`).expect(200)).body
-    .balance as number;
+  Number(
+    (await h.http().get(`/companies/${companyId}`).expect(200)).body.balance,
+  );
 
 export async function dealCount(h: Harness, lotId: string) {
   const [row] = await h.db.query(

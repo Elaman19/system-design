@@ -23,7 +23,7 @@ describe('companies and lots', () => {
     expect(created.body).toMatchObject({
       name: 'ООО Ромашка',
       email,
-      balance: 0,
+      balance: '0',
     });
     const read = await h
       .http()

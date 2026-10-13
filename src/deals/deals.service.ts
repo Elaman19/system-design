@@ -35,7 +35,7 @@ export class DealsService {
 
   /**
    * One transaction, default isolation (READ COMMITTED). Read the lot and both
-   * wallets, check, then write absolute values. The reads take row locks: a concurrent purchase waits, then re-reads the committed state.
+   * wallets, check, then write relative balance changes computed by the database. The reads take row locks: a concurrent purchase waits, then re-reads the committed state.
    *
    * Lock order is always lot, then wallets by id. Two crossing purchases (A buys
    * from B while B buys from A) therefore queue on the first wallet instead of
@@ -93,7 +93,7 @@ export class DealsService {
           'Недостаточно товара на складе',
         );
       }
-      if (Number(buyer.balance) < total) {
+      if (BigInt(buyer.balance) < BigInt(total)) {
         throw apiError(
           HttpStatus.CONFLICT,
           'INSUFFICIENT_FUNDS',
@@ -120,17 +120,16 @@ export class DealsService {
          VALUES ($1, $2, $3, 'sale', $4, clock_timestamp())`,
         [lotId, -quantity, stockAfter, deal.id],
       );
-      const buyerBalance = Number(buyer.balance) - total;
-      const sellerBalance = Number(seller.balance) + total;
+      // Balances are bigint and may exceed 2^53: arithmetic stays in SQL, never in Number.
       await rows(
         em,
-        `UPDATE wallets SET balance = $2, updated_at = now() WHERE id = $1`,
-        [buyer.id, buyerBalance],
+        `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE id = $1`,
+        [buyer.id, total],
       );
       await rows(
         em,
-        `UPDATE wallets SET balance = $2, updated_at = now() WHERE id = $1`,
-        [seller.id, sellerBalance],
+        `UPDATE wallets SET balance = balance + $2, updated_at = now() WHERE id = $1`,
+        [seller.id, total],
       );
       await rows(
         em,

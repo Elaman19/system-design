@@ -4,7 +4,7 @@ import { apiError } from '../common/api-error.js';
 import { rows } from '../db/sql.js';
 import type { CreateCompany } from './companies.schemas.js';
 
-interface CompanyRow {
+export interface CompanyRow {
   id: string;
   name: string;
   email: string;
@@ -26,7 +26,7 @@ export class CompaniesService {
       await rows(em, `INSERT INTO wallets (company_id) VALUES ($1)`, [
         company.id,
       ]);
-      return { id: company.id, name, email, balance: 0 };
+      return { id: company.id, name, email, balance: '0' };
     });
   }
 
@@ -45,6 +45,7 @@ export class CompaniesService {
         'Компания не найдена',
       );
     }
-    return { ...company, balance: Number(company.balance) };
+    // balance stays a string (bigint): it can exceed Number.MAX_SAFE_INTEGER.
+    return company;
   }
 }

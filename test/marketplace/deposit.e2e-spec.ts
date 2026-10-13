@@ -33,7 +33,7 @@ describe('wallet deposit', () => {
       .post(`/companies/${company}/wallet/deposits`)
       .send({ bankNotificationId: randomUUID(), amount: 500_000 })
       .expect(201);
-    expect(res.body.balance).toBe(500_000);
+    expect(res.body.balance).toBe('500000');
     expect(await journalRows(company)).toBe(1);
     await expectLedgerMatchesBalance(h, company);
   });

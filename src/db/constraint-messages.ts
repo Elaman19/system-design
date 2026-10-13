@@ -12,6 +12,8 @@ export const CONSTRAINT_MESSAGES: Record<string, string> = {
   lot_photos_lot_id_position_key: 'Это место в галерее лота уже занято',
   wallet_operations_deal_ledger:
     'Журнал сделки не сходится с её суммой и участниками',
+  lot_stock_history_deal_key: 'Движение остатка по этой сделке уже записано',
+  lot_stock_history_deal_delta: 'Движение остатка не сходится со сделкой',
   wallets_balance_non_negative: 'Недостаточно средств на кошельке',
   lots_stock_non_negative: 'Недостаточно товара на складе',
 };

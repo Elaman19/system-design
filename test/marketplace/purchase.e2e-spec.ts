@@ -160,11 +160,12 @@ describe('purchase', () => {
   });
 
   it('money for one lot, buying two different lots at once: one deal', async () => {
-    const seller = await seedCompany(h);
+    // Different sellers: with one seller his wallet lock alone would serialise the
+    // purchases and hide a missing lock on the buyer's wallet.
     const buyer = await seedCompany(h, 100_000);
     const [lotA, lotB] = [
-      await seedLot(h, seller, { price: 100_000 }),
-      await seedLot(h, seller, { price: 100_000 }),
+      await seedLot(h, await seedCompany(h), { price: 100_000 }),
+      await seedLot(h, await seedCompany(h), { price: 100_000 }),
     ];
     h.hooks.handler = () => sleep(150);
 
@@ -179,6 +180,27 @@ describe('purchase', () => {
     expect((await dealCount(h, lotA)) + (await dealCount(h, lotB))).toBe(1);
     expect(await balanceOf(h, buyer)).toBe(0);
     await expectLedgerMatchesBalance(h, buyer);
+  });
+
+  it('a balance above 2^53 is credited exactly and returned as a string', async () => {
+    const seller = await seedCompany(h);
+    const buyer = await seedCompany(h, 500_000);
+    const lot = await seedLot(h, seller, { price: 1, stock: 5 });
+    await h.db.query(
+      `UPDATE wallets SET balance = 9007199254740992 WHERE company_id = $1`,
+      [seller],
+    );
+    await h.db.query(
+      `INSERT INTO wallet_operations (wallet_id, type, amount, bank_notification_id)
+       SELECT id, 'deposit', 9007199254740992, 'big-' || id FROM wallets WHERE company_id = $1`,
+      [seller],
+    );
+
+    expect((await buy(buyer, lot)).status).toBe(201);
+
+    const res = await h.http().get(`/companies/${seller}`).expect(200);
+    expect(res.body.balance).toBe('9007199254740993');
+    await expectLedgerMatchesBalance(h, seller);
   });
 
   it('the seller changes the price during the purchase: deal total equals the amount debited', async () => {

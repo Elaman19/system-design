@@ -194,6 +194,124 @@ describe('schema rules enforced by the database', () => {
     });
   });
 
+  describe('the ledger is append-only', () => {
+    async function oneDeal() {
+      const seller = await seedCompany(h);
+      const buyer = await seedCompany(h, 1_000);
+      const lot = await seedLot(h, seller, { price: 100, stock: 3 });
+      const res = await h
+        .http()
+        .post('/deals')
+        .send({ buyerId: buyer, lotId: lot, quantity: 1 })
+        .expect(201);
+      return { lot, deal: res.body.id as string };
+    }
+
+    it.each([
+      [
+        'changing a journal amount',
+        `UPDATE wallet_operations SET amount = amount + 1 WHERE deal_id = $1 AND type = 'sale'`,
+        'wallet_operations_append_only',
+      ],
+      [
+        'deleting a journal row',
+        `DELETE FROM wallet_operations WHERE deal_id = $1 AND type = 'sale'`,
+        'wallet_operations_append_only',
+      ],
+      [
+        'repricing a deal',
+        `UPDATE deals SET unit_price = 1 WHERE id = $1`,
+        'deals_append_only',
+      ],
+      [
+        'deleting a deal',
+        `DELETE FROM deals WHERE id = $1`,
+        'deals_append_only',
+      ],
+      [
+        'editing stock history',
+        `UPDATE lot_stock_history SET delta = 5 WHERE deal_id = $1`,
+        'lot_stock_history_append_only',
+      ],
+    ])('rejects %s', async (_name, sql, constraint) => {
+      const { deal } = await oneDeal();
+      await expectPgError(h.db.query(sql, [deal]), '23514', constraint);
+    });
+
+    it('rejects TRUNCATE', async () => {
+      await expectPgError(
+        h.db.query(`TRUNCATE wallet_operations`),
+        '23514',
+        'wallet_operations_append_only',
+      );
+    });
+  });
+
+  describe('stock history of a sale must agree with its deal', () => {
+    it('rejects a delta that differs from the deal quantity, another lot, and a second row', async () => {
+      const seller = await seedCompany(h);
+      const buyer = await seedCompany(h, 1_000);
+      const [lot, other] = [
+        await seedLot(h, seller, { price: 100, stock: 3 }),
+        await seedLot(h, seller, { price: 100, stock: 3 }),
+      ];
+      const wallet = async (c: string) =>
+        (
+          await h.db.query(`SELECT id FROM wallets WHERE company_id = $1`, [c])
+        )[0].id as string;
+      const [walletBuyer, walletSeller] = [
+        await wallet(buyer),
+        await wallet(seller),
+      ];
+      // A bare deal with a correct journal but no stock history yet, then one history row.
+      const history = (lotId: string, delta: number) =>
+        h.db.transaction(async (em) => {
+          const [deal] = await em.query(
+            `INSERT INTO deals (lot_id, seller_id, buyer_id, quantity, unit_price)
+             VALUES ($1, $2, $3, 1, 100) RETURNING id`,
+            [lot, seller, buyer],
+          );
+          await em.query(
+            `INSERT INTO wallet_operations (wallet_id, type, amount, deal_id)
+             VALUES ($1, 'purchase', -100, $3), ($2, 'sale', 100, $3)`,
+            [walletBuyer, walletSeller, deal.id],
+          );
+          await em.query(
+            `INSERT INTO lot_stock_history (lot_id, delta, stock_after, reason, deal_id, changed_at)
+             VALUES ($1, $2, 0, 'sale', $3, now())`,
+            [lotId, delta, deal.id],
+          );
+        });
+
+      await expectPgError(
+        history(lot, 5),
+        '23514',
+        'lot_stock_history_deal_delta',
+      );
+      await expectPgError(
+        history(other, -1),
+        '23503',
+        'lot_stock_history_deal_lot_fkey',
+      );
+
+      // The API already wrote the history row of this deal; a second one is a duplicate.
+      const bought = await h
+        .http()
+        .post('/deals')
+        .send({ buyerId: buyer, lotId: lot, quantity: 1 })
+        .expect(201);
+      await expectPgError(
+        h.db.query(
+          `INSERT INTO lot_stock_history (lot_id, delta, stock_after, reason, deal_id, changed_at)
+           VALUES ($1, -1, 0, 'sale', $2, now())`,
+          [lot, bought.body.id],
+        ),
+        '23505',
+        'lot_stock_history_deal_key',
+      );
+    });
+  });
+
   it('a journal row must match its type', async () => {
     const company = await seedCompany(h);
     const [wallet] = await h.db.query(

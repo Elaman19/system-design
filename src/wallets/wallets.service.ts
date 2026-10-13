@@ -47,7 +47,8 @@ export class WalletsService {
       );
       return {
         operationId: Number(operation.id),
-        balance: Number(updated.balance),
+        // bigint as a string: a balance can exceed Number.MAX_SAFE_INTEGER.
+        balance: updated.balance,
       };
     });
   }
