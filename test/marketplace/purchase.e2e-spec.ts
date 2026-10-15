@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { DataSource, type DataSourceOptions } from 'typeorm';
 import { DealsService } from '../../src/deals/deals.service.js';
 
 /** The naive purchase of step 1: the same code with the row locks blanked. */
@@ -6,15 +7,18 @@ class UnlockedDealsService extends DealsService {
   protected override readonly rowLock = '';
 }
 import {
+  backendPid,
   balanceOf,
   barrier,
   createHarness,
   dealCount,
   expectLedgerMatchesBalance,
   type Harness,
+  holdUntilBlocked,
   seedCompany,
   seedLot,
   sleep,
+  waitUntilBlockedBy,
 } from './helpers.js';
 
 describe('purchase', () => {
@@ -111,27 +115,70 @@ describe('purchase', () => {
         await seedCompany(h, 1_000_000),
       ];
       const lot = await seedLot(h, seller, { price: 100_000, stock: 1 });
-      // A slow transaction: pause after reading, before writing.
-      h.hooks.handler = barrier(2);
       return { seller, b1, b2, lot };
     }
 
-    it('step 2, without locks: the transaction does not help, two deals for one item', async () => {
+    it('step 2, without locks and without the database guards: the transaction does not help, two deals for one item', async () => {
       const { b1, b2, lot } = await scenario();
+      // A slow transaction: nobody writes until both have read "stock = 1". Without
+      // locks both do arrive; if they cannot, the barrier throws instead of timing out quietly.
+      h.hooks.handler = barrier(2);
+      // The schema now refuses this oversell on its own (see step 2b), so the plain race
+      // is shown on a connection with triggers off (session_replication_role = replica;
+      // CHECKs and unique indexes stay on). Only this test's connections are affected.
+      const naive = new DataSource({
+        ...h.db.options,
+        extra: {
+          options: `${(h.db.options as { extra?: { options?: string } }).extra?.options ?? ''} -c session_replication_role=replica`,
+        },
+      } as DataSourceOptions);
+      await naive.initialize();
+      try {
+        const deals = new UnlockedDealsService(naive, h.hooks);
+
+        const results = await Promise.all([
+          deals.purchase({ buyerId: b1, lotId: lot, quantity: 1 }),
+          deals.purchase({ buyerId: b2, lotId: lot, quantity: 1 }),
+        ]);
+
+        expect(results).toHaveLength(2);
+        expect(await dealCount(h, lot)).toBe(2); // sold twice what existed
+        expect(await stockOf(lot)).toBe(0); // both wrote "1 - 1"
+      } finally {
+        await naive.destroy();
+      }
+    });
+
+    it('step 2b, without locks but with the database guards: no double sale, the loser gets a rule violation instead of a clear refusal', async () => {
+      const { b1, b2, lot } = await scenario();
+      h.hooks.handler = barrier(2);
       const deals = new UnlockedDealsService(h.db, h.hooks);
 
-      const results = await Promise.all([
+      const results = await Promise.allSettled([
         deals.purchase({ buyerId: b1, lotId: lot, quantity: 1 }),
         deals.purchase({ buyerId: b2, lotId: lot, quantity: 1 }),
       ]);
 
-      expect(results).toHaveLength(2);
-      expect(await dealCount(h, lot)).toBe(2); // sold twice what existed
-      expect(await stockOf(lot)).toBe(0); // both wrote "1 - 1"
+      expect(results.map((r) => r.status).sort()).toEqual([
+        'fulfilled',
+        'rejected',
+      ]);
+      const failure = results.find((r) => r.status === 'rejected')!;
+      expect(
+        (failure as PromiseRejectedResult).reason.driverError,
+      ).toMatchObject({
+        code: '23514',
+        constraint: 'lot_stock_history_chain',
+      });
+      expect(await dealCount(h, lot)).toBe(1);
+      expect(await stockOf(lot)).toBe(0);
     });
 
     it('step 3, with FOR UPDATE: one deal, the other buyer gets a clear refusal, not a 500', async () => {
       const { b1, b2, lot } = await scenario();
+      // A slow transaction that holds its locks: the first purchase stays open until the
+      // second is queued behind it on the lot row.
+      h.hooks.handler = holdUntilBlocked(h);
 
       const results = await Promise.all([buy(b1, lot), buy(b2, lot)]);
 
@@ -167,7 +214,9 @@ describe('purchase', () => {
       await seedLot(h, await seedCompany(h), { price: 100_000 }),
       await seedLot(h, await seedCompany(h), { price: 100_000 }),
     ];
-    h.hooks.handler = () => sleep(150);
+    // The first purchase stays open until the second is queued on the buyer's wallet.
+    // Without the wallet lock nobody queues up, and the hook fails the test.
+    h.hooks.handler = holdUntilBlocked(h);
 
     const results = await Promise.all([buy(buyer, lotA), buy(buyer, lotB)]);
 
@@ -187,10 +236,6 @@ describe('purchase', () => {
     const buyer = await seedCompany(h, 500_000);
     const lot = await seedLot(h, seller, { price: 1, stock: 5 });
     await h.db.query(
-      `UPDATE wallets SET balance = 9007199254740992 WHERE company_id = $1`,
-      [seller],
-    );
-    await h.db.query(
       `INSERT INTO wallet_operations (wallet_id, type, amount, bank_notification_id)
        SELECT id, 'deposit', 9007199254740992, 'big-' || id FROM wallets WHERE company_id = $1`,
       [seller],
@@ -208,7 +253,7 @@ describe('purchase', () => {
     const buyer = await seedCompany(h, 1_000_000);
     const lot = await seedLot(h, seller, { price: 100_000, stock: 5 });
     let priceChange!: Promise<unknown>;
-    h.hooks.handler = async (point) => {
+    h.hooks.handler = async (point, em) => {
       if (point !== 'purchase:afterRead') return;
       h.hooks.handler = undefined;
       // The lot row is locked by the purchase, so this waits until it commits.
@@ -217,7 +262,8 @@ describe('purchase', () => {
         .patch(`/lots/${lot}/price`)
         .send({ price: 400_000 })
         .then((r) => r);
-      await sleep(200);
+      // Not a sleep: wait until the price change is really queued on the lot row.
+      await waitUntilBlockedBy(h.db, await backendPid(em));
     };
 
     const res = await buy(buyer, lot, 2);

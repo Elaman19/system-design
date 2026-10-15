@@ -13,10 +13,12 @@ export class WalletsService {
   ) {}
 
   /**
-   * The administrator credits a wallet after a bank notification. Journal row and
-   * new balance are written in one transaction. No explicit lock: the balance is
-   * changed with `balance = balance + $1` (atomic in the database), and a repeated
-   * notification is rejected by the unique index, not by a check in this code.
+   * The administrator credits a wallet after a bank notification. One INSERT into
+   * the journal: the database adds the amount to `wallets.balance` in the same
+   * statement (trigger `wallet_operations_apply_balance`), so the journal row and
+   * the new balance are written together or not at all. No explicit lock: the
+   * balance is never read here, and a repeated notification is rejected by the
+   * unique index, not by a check in this code.
    */
   deposit(companyId: string, { bankNotificationId, amount }: Deposit) {
     return this.dataSource.transaction(async (em) => {
@@ -38,12 +40,11 @@ export class WalletsService {
          VALUES ($1, 'deposit', $2, $3) RETURNING id`,
         [wallet.id, amount, bankNotificationId],
       );
-      await this.hooks.at('deposit:afterJournalInsert');
+      await this.hooks.at('deposit:afterJournalInsert', em);
       const [updated] = await rows<{ balance: string }>(
         em,
-        `UPDATE wallets SET balance = balance + $1, updated_at = now()
-          WHERE id = $2 RETURNING balance`,
-        [amount, wallet.id],
+        `SELECT balance FROM wallets WHERE id = $1`,
+        [wallet.id],
       );
       return {
         operationId: Number(operation.id),

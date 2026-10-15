@@ -11,7 +11,16 @@ export const CONSTRAINT_MESSAGES: Record<string, string> = {
   lot_photos_s3_key_key: 'Файл с таким ключом уже привязан к лоту',
   lot_photos_lot_id_position_key: 'Это место в галерее лота уже занято',
   wallet_operations_deal_ledger:
-    'Журнал сделки не сходится с её суммой и участниками',
+    'Журнал и история остатка сделки не сходятся с самой сделкой',
+  wallets_balance_journal_only: 'Баланс меняется только записью в журнал',
+  deals_lot_is_published: 'Лот не опубликован',
+  deals_unit_price_is_lot_price: 'Цена в сделке не совпадает с ценой лота',
+  lot_stock_history_matches_lot: 'Запись истории не совпадает с остатком лота',
+  lot_stock_history_chain: 'Запись истории остатка не продолжает предыдущую',
+  lots_stock_matches_history: 'Остаток лота не совпадает с историей остатка',
+  lots_price_matches_history: 'Цена лота не совпадает с историей цены',
+  lots_publication_matches_history:
+    'Признак публикации лота не совпадает с историей публикации',
   lot_stock_history_deal_key: 'Движение остатка по этой сделке уже записано',
   lot_stock_history_deal_delta: 'Движение остатка не сходится со сделкой',
   wallets_balance_non_negative: 'Недостаточно средств на кошельке',

@@ -54,6 +54,12 @@ Content-Type: application/json
 
 { "price": 26000000 }
 
+### Stock change: a delta, not a total (negative below zero -> 409)
+PATCH http://localhost:3000/lots/{{lot.response.body.id}}/stock
+Content-Type: application/json
+
+{ "delta": 2 }
+
 ### Purchase (FOR UPDATE on the lot and both wallets). Out of stock / no funds -> 409
 POST http://localhost:3000/deals
 Content-Type: application/json

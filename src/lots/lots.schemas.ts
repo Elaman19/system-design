@@ -19,8 +19,14 @@ export type CreateLot = z.infer<typeof createLotSchema>;
 export const publicationSchema = z.object({ published: z.boolean() });
 export type Publication = z.infer<typeof publicationSchema>;
 
+// A change, not a new total: see LotsService.setStock.
 export const stockSchema = z.object({
-  stock: z.number().int().nonnegative().max(MAX_STOCK),
+  delta: z
+    .number()
+    .int()
+    .min(-MAX_STOCK)
+    .max(MAX_STOCK)
+    .refine((n) => n !== 0, 'must not be 0'),
 });
 export type Stock = z.infer<typeof stockSchema>;
 

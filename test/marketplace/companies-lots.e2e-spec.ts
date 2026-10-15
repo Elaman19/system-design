@@ -104,24 +104,66 @@ describe('companies and lots', () => {
       .expect(404);
   });
 
-  it('restocks a lot and records the delta', async () => {
+  it('changes the stock by a delta and records why', async () => {
     const lot = await seedLot(h, await seedCompany(h), { stock: 2 });
     await h
       .http()
       .patch(`/lots/${lot}/stock`)
-      .send({ stock: 7 })
+      .send({ delta: 5 })
       .expect(200)
       .expect((r) => expect(r.body.stock).toBe(7));
-    const [last] = await h.db.query(
-      `SELECT delta, stock_after, reason FROM lot_stock_history WHERE lot_id = $1 ORDER BY id DESC LIMIT 1`,
+    await h
+      .http()
+      .patch(`/lots/${lot}/stock`)
+      .send({ delta: -3 })
+      .expect(200)
+      .expect((r) => expect(r.body.stock).toBe(4));
+    const history = await h.db.query(
+      `SELECT delta, stock_after, reason FROM lot_stock_history WHERE lot_id = $1 ORDER BY id`,
       [lot],
     );
-    expect(last).toEqual({ delta: 5, stock_after: 7, reason: 'restock' });
+    expect(history).toEqual([
+      { delta: 2, stock_after: 2, reason: 'initial' },
+      { delta: 5, stock_after: 7, reason: 'restock' },
+      { delta: -3, stock_after: 4, reason: 'writeoff' },
+    ]);
     await h
       .http()
       .patch(`/lots/${randomUUID()}/stock`)
-      .send({ stock: 1 })
+      .send({ delta: 1 })
       .expect(404);
-    await h.http().patch(`/lots/${lot}/stock`).send({ stock: -1 }).expect(400);
+    for (const delta of [0, 1.5, 'x', undefined]) {
+      await h.http().patch(`/lots/${lot}/stock`).send({ delta }).expect(400);
+    }
+  });
+
+  it('refuses to write off more than is in stock: 409, nothing changes', async () => {
+    const lot = await seedLot(h, await seedCompany(h), { stock: 2 });
+    const res = await h
+      .http()
+      .patch(`/lots/${lot}/stock`)
+      .send({ delta: -3 })
+      .expect(409);
+    expect(res.body.message).toBe('Недостаточно товара на складе');
+    const [row] = await h.db.query(`SELECT stock FROM lots WHERE id = $1`, [
+      lot,
+    ]);
+    expect(row.stock).toBe(2);
+  });
+
+  it('two adjustments at once are both applied: the delta is not a lost update', async () => {
+    const lot = await seedLot(h, await seedCompany(h), { stock: 2 });
+    const adjust = (delta: number) =>
+      h
+        .http()
+        .patch(`/lots/${lot}/stock`)
+        .send({ delta })
+        .then((r) => r);
+    const results = await Promise.all([adjust(5), adjust(-1)]);
+    expect(results.map((r) => r.status)).toEqual([200, 200]);
+    const [row] = await h.db.query(`SELECT stock FROM lots WHERE id = $1`, [
+      lot,
+    ]);
+    expect(row.stock).toBe(6);
   });
 });

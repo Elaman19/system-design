@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
 import { TxHooks, type TxPoint } from '../../src/common/tx-hooks/tx-hooks.js';
 
@@ -11,9 +11,9 @@ export const sleep = (ms: number) =>
 
 /** Replaces the no-op production hooks; a test sets `handler` to pause or fail a transaction. */
 export class TestHooks extends TxHooks {
-  handler?: (point: TxPoint) => Promise<void> | void;
-  override at(point: TxPoint) {
-    return this.handler?.(point);
+  handler?: (point: TxPoint, em: EntityManager) => Promise<void> | void;
+  override at(point: TxPoint, em: EntityManager) {
+    return this.handler?.(point, em);
   }
 }
 
@@ -42,14 +42,66 @@ export async function createHarness(): Promise<Harness> {
   };
 }
 
-/** Both callers wait here until `parties` have arrived (or `timeoutMs` passes). */
-export function barrier(parties: number, timeoutMs = 300) {
+export const backendPid = async (em: EntityManager) =>
+  (await em.query(`SELECT pg_backend_pid() AS pid`))[0].pid as number;
+
+/**
+ * Resolves once some backend is queued behind `pid` (pg_blocking_pids). This is the
+ * observable fact a race test needs: "the second request is waiting for the lock",
+ * instead of a sleep that merely hopes it got there. Throws if nobody queues up.
+ */
+export async function waitUntilBlockedBy(
+  db: DataSource,
+  pid: number,
+  timeoutMs = 5000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [{ n }] = await db.query(
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+      [pid],
+    );
+    if (n > 0) return;
+    if (Date.now() > deadline) {
+      throw new Error(`no backend is waiting for backend ${pid}`);
+    }
+    await sleep(10);
+  }
+}
+
+/**
+ * Handler for a slow transaction that holds its locks: the first transaction to reach
+ * the hook stops there until another one is queued behind it. If the lock under test
+ * is missing nobody queues up, and the test fails loudly instead of passing by luck.
+ */
+export function holdUntilBlocked(h: Harness) {
+  let taken = false;
+  return async (_point: TxPoint, em: EntityManager) => {
+    if (taken) return;
+    taken = true;
+    await waitUntilBlockedBy(h.db, await backendPid(em));
+  };
+}
+
+/** Every caller waits here until `parties` have arrived; throws if they never do. */
+export function barrier(parties: number, timeoutMs = 5000) {
   let arrived = 0;
   let release!: () => void;
   const open = new Promise<void>((resolve) => (release = resolve));
   return async () => {
     if (++arrived >= parties) release();
-    await Promise.race([open, sleep(timeoutMs)]);
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`only ${arrived}/${parties} arrived`)),
+        timeoutMs,
+      );
+    });
+    try {
+      await Promise.race([open, timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
   };
 }
 

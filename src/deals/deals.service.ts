@@ -35,7 +35,9 @@ export class DealsService {
 
   /**
    * One transaction, default isolation (READ COMMITTED). Read the lot and both
-   * wallets, check, then write relative balance changes computed by the database. The reads take row locks: a concurrent purchase waits, then re-reads the committed state.
+   * wallets, check, then write the stock, the deal and the journal; wallet balances
+   * follow from the journal inside the database. The reads take row locks: a
+   * concurrent purchase waits, then re-reads the committed state.
    *
    * Lock order is always lot, then wallets by id. Two crossing purchases (A buys
    * from B while B buys from A) therefore queue on the first wallet instead of
@@ -75,10 +77,11 @@ export class DealsService {
       }
       const seller = wallets.find((w) => w.company_id === lot.seller_id)!;
 
-      await this.hooks.at('purchase:afterRead');
+      await this.hooks.at('purchase:afterRead', em);
 
-      const unitPrice = Number(lot.price);
-      const total = unitPrice * quantity;
+      // bigint end to end: the total never goes through a JS number, whatever the
+      // bounds in deals.schemas.ts are. Only the response below converts it.
+      const total = BigInt(lot.price) * BigInt(quantity);
       if (!lot.is_published) {
         throw apiError(
           HttpStatus.CONFLICT,
@@ -93,7 +96,7 @@ export class DealsService {
           'Недостаточно товара на складе',
         );
       }
-      if (BigInt(buyer.balance) < BigInt(total)) {
+      if (BigInt(buyer.balance) < total) {
         throw apiError(
           HttpStatus.CONFLICT,
           'INSUFFICIENT_FUNDS',
@@ -112,7 +115,7 @@ export class DealsService {
         `INSERT INTO deals (lot_id, seller_id, buyer_id, quantity, unit_price, created_at)
          VALUES ($1, $2, $3, $4, $5, clock_timestamp())
          RETURNING id, created_at`,
-        [lotId, lot.seller_id, buyerId, quantity, unitPrice],
+        [lotId, lot.seller_id, buyerId, quantity, lot.price],
       );
       await rows(
         em,
@@ -120,22 +123,13 @@ export class DealsService {
          VALUES ($1, $2, $3, 'sale', $4, clock_timestamp())`,
         [lotId, -quantity, stockAfter, deal.id],
       );
-      // Balances are bigint and may exceed 2^53: arithmetic stays in SQL, never in Number.
-      await rows(
-        em,
-        `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE id = $1`,
-        [buyer.id, total],
-      );
-      await rows(
-        em,
-        `UPDATE wallets SET balance = balance + $2, updated_at = now() WHERE id = $1`,
-        [seller.id, total],
-      );
+      // Balances are bigint and may exceed 2^53: the database adds the amounts to
+      // wallets.balance itself (trigger on wallet_operations), nothing is computed here.
       await rows(
         em,
         `INSERT INTO wallet_operations (wallet_id, type, amount, deal_id)
          VALUES ($1, 'purchase', $2, $4), ($3, 'sale', $5, $4)`,
-        [buyer.id, -total, seller.id, deal.id, total],
+        [buyer.id, (-total).toString(), seller.id, deal.id, total.toString()],
       );
 
       return {
@@ -144,8 +138,9 @@ export class DealsService {
         sellerId: lot.seller_id,
         buyerId,
         quantity,
-        unitPrice,
-        total,
+        // Bounded by MAX_PRICE * MAX_QUANTITY (< 2^53), so Number is exact here.
+        unitPrice: Number(lot.price),
+        total: Number(total),
         createdAt: deal.created_at,
       };
     });

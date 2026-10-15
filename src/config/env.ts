@@ -11,6 +11,16 @@ const envSchema = z.object({
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
   DB_NAME: z.string().min(1),
+  // Server-side limits of the app's connections (not of the migration CLI). Without
+  // them one stuck transaction holding FOR UPDATE queues every purchase behind it
+  // until the pool is exhausted. 0 disables a limit.
+  DB_LOCK_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(5000),
+  DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(30000),
+  DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(30000),
 
   // Not used by the app yet (no clients wired), but validated when present so a
   // typo fails at startup once they are.

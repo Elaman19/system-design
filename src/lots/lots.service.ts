@@ -94,26 +94,26 @@ export class LotsService {
     });
   }
 
-  /** Sets the stock; the row is locked so a concurrent purchase cannot slip between read and write. */
-  setStock(id: string, { stock }: Stock) {
+  /**
+   * Changes the stock by a delta, never to an absolute value: a seller who read 2 and
+   * sends "+5" while a buyer takes one must end at 6, not at a stale 7. The UPDATE
+   * takes the row lock and returns the new stock, which the history row records; a
+   * write-off below zero is stopped by `lots_stock_non_negative` (409).
+   */
+  setStock(id: string, { delta }: Stock) {
     return this.dataSource.transaction(async (em) => {
-      const [current] = await rows<{ stock: number }>(
-        em,
-        `SELECT stock FROM lots WHERE id = $1 FOR UPDATE`,
-        [id],
-      );
-      if (!current) throw lotNotFound();
       const [lot] = await rows<LotRow>(
         em,
-        `UPDATE lots SET stock = $2, updated_at = now() WHERE id = $1
+        `UPDATE lots SET stock = stock + $2, updated_at = now() WHERE id = $1
          RETURNING id, seller_id, title, price, stock, is_published`,
-        [id, stock],
+        [id, delta],
       );
+      if (!lot) throw lotNotFound();
       await rows(
         em,
         `INSERT INTO lot_stock_history (lot_id, delta, stock_after, reason, changed_at)
-         VALUES ($1, $2, $3, 'restock', clock_timestamp())`,
-        [id, stock - current.stock, stock],
+         VALUES ($1, $2, $3, $4, clock_timestamp())`,
+        [id, delta, lot.stock, delta > 0 ? 'restock' : 'writeoff'],
       );
       return view(lot);
     });
@@ -129,7 +129,7 @@ export class LotsService {
         [id, price],
       );
       if (!lot) throw lotNotFound();
-      await this.hooks.at('price:afterUpdate');
+      await this.hooks.at('price:afterUpdate', em);
       await rows(
         em,
         `INSERT INTO lot_price_history (lot_id, price, valid_from)

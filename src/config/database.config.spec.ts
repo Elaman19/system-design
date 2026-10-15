@@ -7,6 +7,9 @@ const env = {
   DB_USER: 'db-user',
   DB_PASSWORD: 'db-password',
   DB_NAME: 'db-name',
+  DB_LOCK_TIMEOUT_MS: 4000,
+  DB_STATEMENT_TIMEOUT_MS: 20000,
+  DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: 10000,
 } as Env;
 
 describe('databaseConfig', () => {
@@ -21,6 +24,16 @@ describe('databaseConfig', () => {
       synchronize: false,
       autoLoadEntities: true,
     });
+  });
+
+  it('sets lock, statement and idle-in-transaction timeouts on app connections only', () => {
+    expect(databaseConfig(env)).toMatchObject({
+      extra: {
+        options:
+          '-c lock_timeout=4000 -c statement_timeout=20000 -c idle_in_transaction_session_timeout=10000',
+      },
+    });
+    expect(dataSourceOptions(env)).not.toHaveProperty('extra');
   });
 
   it('builds CLI data source options without autoLoadEntities', () => {

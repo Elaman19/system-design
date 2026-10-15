@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
+  backendPid,
   balanceOf,
   createHarness,
   expectLedgerMatchesBalance,
   type Harness,
   seedCompany,
-  sleep,
+  holdUntilBlocked,
+  waitUntilBlockedBy,
 } from './helpers.js';
 
 describe('wallet deposit', () => {
@@ -47,7 +49,9 @@ describe('wallet deposit', () => {
     const hold = new Promise<void>((resolve) => (release = resolve));
     // The first transaction stops after writing its journal row and is still
     // uncommitted when the second request arrives.
-    h.hooks.handler = async () => {
+    let firstPid!: number;
+    h.hooks.handler = async (_point, em) => {
+      firstPid = await backendPid(em);
       reached();
       await hold;
     };
@@ -63,7 +67,8 @@ describe('wallet deposit', () => {
       .post(`/companies/${company}/wallet/deposits`)
       .send(body)
       .then((r) => r);
-    await sleep(300); // the second INSERT now waits on the unique index
+    // Not a sleep: wait until the second INSERT is really queued on the unique index.
+    await waitUntilBlockedBy(h.db, firstPid);
     release();
     const [a, b] = await Promise.all([first, second]);
 
@@ -73,6 +78,26 @@ describe('wallet deposit', () => {
       message: 'Это банковское уведомление уже обработано',
     });
     expect(await journalRows(company)).toBe(1);
+    expect(await balanceOf(h, company)).toBe(700_000);
+    await expectLedgerMatchesBalance(h, company);
+  });
+
+  it('two different deposits to one wallet at once: both credited, nothing lost', async () => {
+    const company = await seedCompany(h);
+    const deposit = (amount: number) =>
+      h
+        .http()
+        .post(`/companies/${company}/wallet/deposits`)
+        .send({ bankNotificationId: randomUUID(), amount })
+        .then((r) => r);
+    // The first deposit stays open until the second one is queued on the wallet row
+    // (the balance trigger locks it), so the two really overlap.
+    h.hooks.handler = holdUntilBlocked(h);
+
+    const results = await Promise.all([deposit(300_000), deposit(400_000)]);
+
+    expect(results.map((r) => r.status)).toEqual([201, 201]);
+    expect(await journalRows(company)).toBe(2);
     expect(await balanceOf(h, company)).toBe(700_000);
     await expectLedgerMatchesBalance(h, company);
   });

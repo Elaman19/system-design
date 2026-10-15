@@ -80,6 +80,17 @@ describe('PgErrorFilter', () => {
     }
   });
 
+  it('lock timeout -> 409 RETRY, statement timeout -> 503', () => {
+    expect(mapped(failure('55P03'))).toMatchObject({
+      status: 409,
+      body: { code: 'RETRY' },
+    });
+    expect(mapped(failure('57014'))).toMatchObject({
+      status: 503,
+      body: { code: 'DB_TIMEOUT' },
+    });
+  });
+
   it('anything else is passed on untouched (500)', () => {
     const error = failure('XX000');
     expect(mapped(error)).toBe(error);

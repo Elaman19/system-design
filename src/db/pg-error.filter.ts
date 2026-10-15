@@ -60,6 +60,24 @@ export class PgErrorFilter extends BaseExceptionFilter {
           ),
           host,
         );
+      case '55P03': // lock_not_available: lock_timeout expired
+        return super.catch(
+          apiError(
+            HttpStatus.CONFLICT,
+            'RETRY',
+            'Конфликт одновременных операций, повторите запрос',
+          ),
+          host,
+        );
+      case '57014': // query_canceled: statement_timeout expired
+        return super.catch(
+          apiError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            'DB_TIMEOUT',
+            'База не ответила вовремя, повторите запрос позже',
+          ),
+          host,
+        );
       default:
         return super.catch(exception, host);
     }
