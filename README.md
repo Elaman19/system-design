@@ -125,8 +125,11 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 
 - [Уровень 1 — System Context](<docs/architecture/L1 - System Context.drawio.svg>)
 - [Уровень 2 — Containers](<docs/architecture/L2 - Containers.drawio.svg>)
+- [Deployment — Docker Compose](<docs/architecture/Deployment - Docker Compose.drawio.svg>): порты, протоколы, образы и тома; на Context и Containers их нет
 
 ![Containers](<docs/architecture/L2 - Containers.drawio.svg>)
+
+По замечаниям интервьюера C4-диаграммы переделаны: конкретная система Equipment MarketPlace с реальными ролями, без портов и протоколов (они на Deployment), SPA не отдельный контейнер, у воркера есть доступ к БД. Таблица «замечание → что сделано → где на схеме»: [docs/system-design/marketplace-v2/README.md](docs/system-design/marketplace-v2/README.md#что-изменилось-после-замечаний-интервьюера).
 
 ### Системный дизайн: площадка (карта роста)
 
@@ -152,7 +155,7 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 | `WORK_ENDPOINT_ENABLED=true` в `.env.example`; переменные Redis/OpenSearch/S3 не проверялись схемой; `stop_grace_period` нигде не сверялся с таймингами; лишняя строка в хуке | мелкие           | исправлено: `false` в шаблоне, необязательные URL в схеме, тест на тайминги, строка убрана                                                  |
 | `loadEnv()` вызывается дважды (в `main.ts` и в `EnvModule`)                                                                                                                   | мелкая           | **не согласен**: функция чистая и дешёвая, а передача `env` через `AppModule` ломает e2e-тесты, которые собирают модуль напрямую            |
 | Диаграммы: Docker Engine нарисован внешней системой; имя «Equipment Marketplace» не совпадает с заголовком; подпись стрелки клиента упоминала `/live` и `/ready`              | средние и мелкая | исправлено: платформа убрана с C4-схем, имя `system-design`, подпись `JSON/HTTP`                                                            |
-| Диаграммы: Person описан как «разработчик или скрипт»; глагол «читает/пишет» у стрелки app - postgres; упоминание `app_test` в описании Postgres                              | мелкие           | пока не исправлено                                                                                                                          |
+| Диаграммы: Person описан как «разработчик или скрипт»; глагол «читает/пишет» у стрелки app - postgres; упоминание `app_test` в описании Postgres                              | мелкие           | исправлено: L1 и L2 перерисованы под площадку (покупатель, продавец, администратор), `app_test` убран                                       |
 | Нет системного дизайна с картой роста площадки                                                                                                                                | высокая          | исправлено: `docs/system-design/marketplace-v1/`                                                                                            |
 
 ## Домашка 04 — база данных, транзакции, карта роста v2
