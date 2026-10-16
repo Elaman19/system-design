@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { DataSource, type DataSourceOptions } from 'typeorm';
 import { DealsService } from '../../src/deals/deals.service.js';
 
 /** The naive purchase of step 1: the same code with the row locks blanked. */
@@ -11,6 +10,7 @@ import {
   balanceOf,
   barrier,
   createHarness,
+  createScratchHarness,
   dealCount,
   expectLedgerMatchesBalance,
   type Harness,
@@ -118,23 +118,25 @@ describe('purchase', () => {
       return { seller, b1, b2, lot };
     }
 
-    it('step 2, without locks and without the database guards: the transaction does not help, two deals for one item', async () => {
-      const { b1, b2, lot } = await scenario();
-      // A slow transaction: nobody writes until both have read "stock = 1". Without
-      // locks both do arrive; if they cannot, the barrier throws instead of timing out quietly.
-      h.hooks.handler = barrier(2);
-      // The schema now refuses this oversell on its own (see step 2b), so the plain race
-      // is shown on a connection with triggers off (session_replication_role = replica;
-      // CHECKs and unique indexes stay on). Only this test's connections are affected.
-      const naive = new DataSource({
-        ...h.db.options,
-        extra: {
-          options: `${(h.db.options as { extra?: { options?: string } }).extra?.options ?? ''} -c session_replication_role=replica`,
-        },
-      } as DataSourceOptions);
-      await naive.initialize();
+    it('step 2, without locks, on a schema without the stock-history chain: the transaction does not help, two deals and twice the money for one item', async () => {
+      // The full schema refuses this oversell on its own (step 2b). So step 2 runs on a
+      // database of its own with every migration applied and only the chain trigger
+      // dropped: foreign keys, CHECKs, the balance trigger and the ledger check stay on,
+      // and app_test keeps all its guards.
+      const naive = await createScratchHarness(h, 'app_test_step2', (db) =>
+        db.query(`DROP TRIGGER lot_stock_history_state ON lot_stock_history`),
+      );
       try {
-        const deals = new UnlockedDealsService(naive, h.hooks);
+        const seller = await seedCompany(naive);
+        const [b1, b2] = [
+          await seedCompany(naive, 1_000_000),
+          await seedCompany(naive, 1_000_000),
+        ];
+        const lot = await seedLot(naive, seller, { price: 100_000, stock: 1 });
+        // A slow transaction: nobody writes until both have read "stock = 1". Without
+        // locks both do arrive; if they cannot, the barrier throws instead of timing out quietly.
+        naive.hooks.handler = barrier(2);
+        const deals = new UnlockedDealsService(naive.db, naive.hooks);
 
         const results = await Promise.all([
           deals.purchase({ buyerId: b1, lotId: lot, quantity: 1 }),
@@ -142,10 +144,21 @@ describe('purchase', () => {
         ]);
 
         expect(results).toHaveLength(2);
-        expect(await dealCount(h, lot)).toBe(2); // sold twice what existed
-        expect(await stockOf(lot)).toBe(0); // both wrote "1 - 1"
+        expect(await dealCount(naive, lot)).toBe(2); // sold twice what existed
+        const [{ stock }] = await naive.db.query(
+          `SELECT stock FROM lots WHERE id = $1`,
+          [lot],
+        );
+        expect(stock).toBe(0); // both wrote "1 - 1"
+        // ...and the money moved for both: two buyers paid, the seller got paid twice.
+        expect(await balanceOf(naive, b1)).toBe(900_000);
+        expect(await balanceOf(naive, b2)).toBe(900_000);
+        expect(await balanceOf(naive, seller)).toBe(200_000);
+        for (const company of [seller, b1, b2]) {
+          await expectLedgerMatchesBalance(naive, company);
+        }
       } finally {
-        await naive.destroy();
+        await naive.close();
       }
     });
 

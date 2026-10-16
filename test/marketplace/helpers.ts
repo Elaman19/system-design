@@ -2,9 +2,19 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { DataSource, type EntityManager } from 'typeorm';
+import {
+  DataSource,
+  type DataSourceOptions,
+  type EntityManager,
+} from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
 import { TxHooks, type TxPoint } from '../../src/common/tx-hooks/tx-hooks.js';
+import { ENV, type Env, loadEnv } from '../../src/config/env.js';
+import { InitMarketplace1760400000000 } from '../../src/migrations/1760400000000-InitMarketplace.js';
+import { DealLedgerInvariant1760500000000 } from '../../src/migrations/1760500000000-DealLedgerInvariant.js';
+import { AppendOnlyLedger1760600000000 } from '../../src/migrations/1760600000000-AppendOnlyLedger.js';
+import { EnforceDealRules1760700000000 } from '../../src/migrations/1760700000000-EnforceDealRules.js';
+import { CompanyWalletJournalTime1760800000000 } from '../../src/migrations/1760800000000-CompanyWalletJournalTime.js';
 
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -25,11 +35,14 @@ export interface Harness {
   close: () => Promise<void>;
 }
 
-export async function createHarness(): Promise<Harness> {
+/** The app on `app_test`, or with `env` overridden (e.g. another test database). */
+export async function createHarness(env: Partial<Env> = {}): Promise<Harness> {
   const hooks = new TestHooks();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(TxHooks)
     .useValue(hooks)
+    .overrideProvider(ENV)
+    .useValue({ ...loadEnv(), ...env })
     .compile();
   const app = moduleRef.createNestApplication();
   await app.listen(0, '127.0.0.1');
@@ -39,6 +52,52 @@ export async function createHarness(): Promise<Harness> {
     db: app.get(DataSource),
     http: () => request(app.getHttpServer()),
     close: () => app.close(),
+  };
+}
+
+/**
+ * Every migration, for a database a test creates on its own. The schema test checks
+ * that this list matches what the migrate step applied to `app_test`.
+ */
+export const MIGRATIONS = [
+  InitMarketplace1760400000000,
+  DealLedgerInvariant1760500000000,
+  AppendOnlyLedger1760600000000,
+  EnforceDealRules1760700000000,
+  CompanyWalletJournalTime1760800000000,
+];
+
+/**
+ * The app on a database of its own: created empty next to `app_test`, migrated from
+ * scratch, then changed by `prepare` (e.g. one guard dropped to show what it closes).
+ * `app_test` itself is never altered; `close` drops the database again.
+ */
+export async function createScratchHarness(
+  base: Harness,
+  name: string,
+  prepare: (db: DataSource) => Promise<unknown>,
+): Promise<Harness> {
+  await base.db.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await base.db.query(`CREATE DATABASE ${name}`);
+  const admin = new DataSource({
+    ...base.db.options,
+    database: name,
+    migrations: MIGRATIONS,
+  } as DataSourceOptions);
+  await admin.initialize();
+  try {
+    await admin.runMigrations({ transaction: 'each' });
+    await prepare(admin);
+  } finally {
+    await admin.destroy();
+  }
+  const h = await createHarness({ DB_NAME: name });
+  return {
+    ...h,
+    close: async () => {
+      await h.close();
+      await base.db.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    },
   };
 }
 

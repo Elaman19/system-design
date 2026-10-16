@@ -75,6 +75,8 @@ export class DealsService {
           'Покупатель не найден',
         );
       }
+      // Always there: lots.seller_id references a company, and the database keeps a
+      // wallet for every company (companies_wallet_required, wallets_keep_company).
       const seller = wallets.find((w) => w.company_id === lot.seller_id)!;
 
       await this.hooks.at('purchase:afterRead', em);

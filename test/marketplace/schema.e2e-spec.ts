@@ -5,6 +5,7 @@ import {
   expectLedgerMatchesBalance,
   expectPgError,
   type Harness,
+  MIGRATIONS,
   seedCompany,
   seedLot,
 } from './helpers.js';
@@ -17,12 +18,10 @@ describe('schema rules enforced by the database', () => {
   afterAll(() => h.close());
 
   it('migrations were applied to an empty database by the separate migrate step', async () => {
-    const names = await h.db.query(`SELECT name FROM migrations`);
+    const names = await h.db.query(`SELECT name FROM migrations ORDER BY id`);
+    // MIGRATIONS (used by tests that build a database of their own) must be the full list.
     expect(names.map((r: { name: string }) => r.name)).toEqual(
-      expect.arrayContaining([
-        'InitMarketplace1760400000000',
-        'EnforceDealRules1760700000000',
-      ]),
+      MIGRATIONS.map((m) => m.name),
     );
   });
 
@@ -60,6 +59,44 @@ describe('schema rules enforced by the database', () => {
       '23505',
       'wallets_company_id_key',
     );
+  });
+
+  it('rule 2, other half: a company has a wallet (checked at commit) and keeps it', async () => {
+    await expectPgError(
+      h.db.query(`INSERT INTO companies (name, email) VALUES ('X', $1)`, [
+        `${randomUUID()}@example.com`,
+      ]),
+      '23514',
+      'companies_wallet_required',
+    );
+    const [a, b] = [await seedCompany(h), await seedCompany(h)];
+    await expectPgError(
+      h.db.query(`DELETE FROM wallets WHERE company_id = $1`, [a]),
+      '23514',
+      'wallets_keep_company',
+    );
+    await expectPgError(
+      h.db.query(`UPDATE wallets SET company_id = $2 WHERE company_id = $1`, [
+        a,
+        b,
+      ]),
+      '23514',
+      'wallets_keep_company',
+    );
+  });
+
+  it('a journal row gets the time of the insert, not of the transaction start', async () => {
+    const company = await seedCompany(h);
+    const [row] = await h.db.transaction(async (em) => {
+      await em.query(`SELECT pg_sleep(0.05)`);
+      return em.query(
+        `INSERT INTO wallet_operations (wallet_id, type, amount, bank_notification_id)
+         SELECT id, 'deposit', 1, $2 FROM wallets WHERE company_id = $1
+         RETURNING created_at > now() AS after_start`,
+        [company, randomUUID()],
+      );
+    });
+    expect(row.after_start).toBe(true);
   });
 
   it('rule 3: one bank notification cannot credit two wallets either', async () => {
@@ -164,14 +201,17 @@ describe('schema rules enforced by the database', () => {
         '23514',
         'wallets_balance_journal_only',
       );
-      const [created] = await h.db.query(
-        `INSERT INTO companies (name, email) VALUES ('X', $1) RETURNING id`,
-        [`${randomUUID()}@example.com`],
-      );
       await expectPgError(
-        h.db.query(`INSERT INTO wallets (company_id, balance) VALUES ($1, 5)`, [
-          created.id,
-        ]),
+        h.db.transaction(async (em) => {
+          const [created] = await em.query(
+            `INSERT INTO companies (name, email) VALUES ('X', $1) RETURNING id`,
+            [`${randomUUID()}@example.com`],
+          );
+          await em.query(
+            `INSERT INTO wallets (company_id, balance) VALUES ($1, 5)`,
+            [created.id],
+          );
+        }),
         '23514',
         'wallets_balance_journal_only',
       );

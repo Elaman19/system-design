@@ -13,6 +13,8 @@ export const CONSTRAINT_MESSAGES: Record<string, string> = {
   wallet_operations_deal_ledger:
     'Журнал и история остатка сделки не сходятся с самой сделкой',
   wallets_balance_journal_only: 'Баланс меняется только записью в журнал',
+  companies_wallet_required: 'У компании должен быть кошелёк',
+  wallets_keep_company: 'Кошелёк нельзя удалить или передать другой компании',
   deals_lot_is_published: 'Лот не опубликован',
   deals_unit_price_is_lot_price: 'Цена в сделке не совпадает с ценой лота',
   lot_stock_history_matches_lot: 'Запись истории не совпадает с остатком лота',
