@@ -2,7 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { apiError } from '../common/api-error.js';
 import { rows } from '../db/sql.js';
-import type { CreateLot, Price, Publication, Stock } from './lots.schemas.js';
+import type {
+  Catalog,
+  CreateLot,
+  Price,
+  Publication,
+  Stock,
+} from './lots.schemas.js';
 import { TxHooks } from '../common/tx-hooks/tx-hooks.js';
 
 interface LotRow {
@@ -16,6 +22,15 @@ interface LotRow {
 
 const lotNotFound = () =>
   apiError(HttpStatus.NOT_FOUND, 'LOT_NOT_FOUND', 'Лот не найден');
+
+interface CatalogRow extends LotRow {
+  seller_name: string;
+  delivery_methods: string[];
+}
+
+/** `%`, `_` and `\` in the user's text match themselves, not "anything". */
+const containsPattern = (text: string) =>
+  `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 
 const view = (lot: LotRow) => ({
   id: lot.id,
@@ -32,6 +47,55 @@ export class LotsService {
     private readonly dataSource: DataSource,
     private readonly hooks: TxHooks,
   ) {}
+
+  /**
+   * What buyers see: published lots only, newest first, optionally filtered by text in
+   * the lot title or the seller's name or email (ADR 0005: PostgreSQL until search
+   * outgrows it). Keyset pagination: `after` is the last id of the previous page and
+   * the database resolves it to its (created_at, id), so pages neither skip nor repeat
+   * rows when lots are added in between, and microseconds never pass through JS.
+   * One row more than `limit` is read to tell whether there is a next page.
+   */
+  async catalog({ q, limit, after }: Catalog) {
+    const em = this.dataSource.manager;
+    if (after) {
+      const [cursor] = await rows(em, `SELECT 1 FROM lots WHERE id = $1`, [
+        after,
+      ]);
+      if (!cursor) {
+        throw apiError(
+          HttpStatus.BAD_REQUEST,
+          'VALIDATION_FAILED',
+          'Некорректные данные: after: лот не найден',
+        );
+      }
+    }
+    const found = await rows<CatalogRow>(
+      em,
+      `SELECT l.id, l.seller_id, c.name AS seller_name, l.title, l.price, l.stock,
+              l.is_published,
+              coalesce((SELECT array_agg(m.method ORDER BY m.method)
+                          FROM lot_delivery_methods m WHERE m.lot_id = l.id),
+                       '{}') AS delivery_methods
+         FROM lots l JOIN companies c ON c.id = l.seller_id
+        WHERE l.is_published
+          AND ($1::text IS NULL OR l.title ILIKE $1 OR c.name ILIKE $1 OR c.email ILIKE $1)
+          AND ($2::uuid IS NULL
+               OR (l.created_at, l.id) < (SELECT created_at, id FROM lots WHERE id = $2))
+        ORDER BY l.created_at DESC, l.id DESC
+        LIMIT $3`,
+      [q === undefined ? null : containsPattern(q), after ?? null, limit + 1],
+    );
+    const page = found.slice(0, limit);
+    return {
+      items: page.map((lot) => ({
+        ...view(lot),
+        sellerName: lot.seller_name,
+        deliveryMethods: lot.delivery_methods,
+      })),
+      nextAfter: found.length > limit ? page[page.length - 1].id : null,
+    };
+  }
 
   /**
    * Current state in `lots`, plus the first row of every history table. Current

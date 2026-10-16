@@ -48,6 +48,10 @@ Content-Type: application/json
 
 { "published": true }
 
+### Catalog: published lots, newest first; q searches the title and the seller's name or email.
+# Next page: ?after=<nextAfter from the previous response>
+GET http://localhost:3000/lots?q=станок&limit=20
+
 ### Price change (new price and a history row, in one transaction)
 PATCH http://localhost:3000/lots/{{lot.response.body.id}}/price
 Content-Type: application/json

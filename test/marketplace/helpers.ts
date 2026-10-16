@@ -15,6 +15,7 @@ import { DealLedgerInvariant1760500000000 } from '../../src/migrations/176050000
 import { AppendOnlyLedger1760600000000 } from '../../src/migrations/1760600000000-AppendOnlyLedger.js';
 import { EnforceDealRules1760700000000 } from '../../src/migrations/1760700000000-EnforceDealRules.js';
 import { CompanyWalletJournalTime1760800000000 } from '../../src/migrations/1760800000000-CompanyWalletJournalTime.js';
+import { LotsCatalogIndex1760900000000 } from '../../src/migrations/1760900000000-LotsCatalogIndex.js';
 
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -65,6 +66,7 @@ export const MIGRATIONS = [
   AppendOnlyLedger1760600000000,
   EnforceDealRules1760700000000,
   CompanyWalletJournalTime1760800000000,
+  LotsCatalogIndex1760900000000,
 ];
 
 /**

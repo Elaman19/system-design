@@ -1,14 +1,18 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import {
+  catalogSchema,
   createLotSchema,
+  type Catalog,
   priceSchema,
   publicationSchema,
   stockSchema,
@@ -22,6 +26,11 @@ import { LotsService } from './lots.service.js';
 @Controller('lots')
 export class LotsController {
   constructor(private readonly lots: LotsService) {}
+
+  @Get()
+  catalog(@Query(new ZodValidationPipe(catalogSchema)) query: Catalog) {
+    return this.lots.catalog(query);
+  }
 
   @Post()
   create(@Body(new ZodValidationPipe(createLotSchema)) body: CreateLot) {

@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS deps
+# Exact version, like the images in docker-compose.yml: a rebuild must not
+# silently pick up a newer Node.
+FROM node:24.21.0-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
@@ -9,7 +11,7 @@ FROM deps AS build
 COPY . .
 RUN npm run build
 
-FROM node:24-alpine AS runtime
+FROM node:24.21.0-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

@@ -13,7 +13,8 @@
 - **pino через `nestjs-pino`** — структурированные JSON-логи (готовы к отправке в OpenSearch), самый быстрый логгер в экосистеме Node, заменяет встроенный логгер Nest; `pino-pretty` используется только при `NODE_ENV=development`.
 - **OpenSearch** вместо Elasticsearch — лицензия Apache 2.0, плагин безопасности для локальной разработки отключается без усилий.
 - **SeaweedFS** вместо MinIO — `minio/minio` теперь требует входа в Docker Hub для загрузки; S3-шлюз SeaweedFS (`chrislusf/seaweedfs`) свободно скачивается, активно поддерживается и совместим с S3.
-- **Node 24 LTS** (`node:24-alpine`) — текущая Active LTS.
+- **Node 24 LTS** (`node:24.21.0-alpine`) — текущая Active LTS.
+- **Точные версии образов** — `postgres:17.11-alpine`, `redis:7.4.11-alpine`, `opensearchproject/opensearch:2.19.6`, `chrislusf/seaweedfs:4.48`, `node:24.21.0-alpine`: плавающий тег (`latest`, `17-alpine`) при следующем `pull` молча приносит новую версию, и два разработчика или два прогона CI работают на разных серверах. Версию поднимаем сознательно, отдельным коммитом.
 
 Redis, OpenSearch и SeaweedFS поднимаются в Compose и доступны через переменные окружения с самого начала; клиенты для них в приложении пока не подключены, их добавят, когда они понадобятся какой-нибудь функции.
 
@@ -164,20 +165,21 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 
 - **Схема данных, ER-диаграмма, нормальные формы, таблицы «правило → гарантия → ответ клиенту» и «операция → транзакция → блокировка», ответы на вопросы:** [docs/db/README.md](docs/db/README.md).
 - **Системный дизайн, версия 2** (карта, данные → хранилище, ADR): [docs/system-design/marketplace-v2/](docs/system-design/marketplace-v2/README.md).
-- Миграции (пять, список и что в каждой - в [docs/db/README.md](docs/db/README.md)): [`InitMarketplace`](src/migrations/1760400000000-InitMarketplace.ts), [`DealLedgerInvariant`](src/migrations/1760500000000-DealLedgerInvariant.ts), [`AppendOnlyLedger`](src/migrations/1760600000000-AppendOnlyLedger.ts), [`EnforceDealRules`](src/migrations/1760700000000-EnforceDealRules.ts), [`CompanyWalletJournalTime`](src/migrations/1760800000000-CompanyWalletJournalTime.ts); код: модули `src/companies/`, `src/lots/`, `src/wallets/`, `src/deals/` (по одному feature-модулю на домен: controller, service, schemas, module), общий шов `src/common/tx-hooks/`, `src/db/` (ошибки Postgres → 409/422), тесты: `test/marketplace/`.
+- Миграции (шесть, список и что в каждой - в [docs/db/README.md](docs/db/README.md)): [`InitMarketplace`](src/migrations/1760400000000-InitMarketplace.ts), [`DealLedgerInvariant`](src/migrations/1760500000000-DealLedgerInvariant.ts), [`AppendOnlyLedger`](src/migrations/1760600000000-AppendOnlyLedger.ts), [`EnforceDealRules`](src/migrations/1760700000000-EnforceDealRules.ts), [`CompanyWalletJournalTime`](src/migrations/1760800000000-CompanyWalletJournalTime.ts), [`LotsCatalogIndex`](src/migrations/1760900000000-LotsCatalogIndex.ts); код: модули `src/companies/`, `src/lots/`, `src/wallets/`, `src/deals/` (по одному feature-модулю на домен: controller, service, schemas, module), общий шов `src/common/tx-hooks/`, `src/db/` (ошибки Postgres → 409/422), тесты: `test/marketplace/`.
 
 ![Карта роста, версия 2](docs/system-design/marketplace-v2/growth-map.drawio.svg)
 
 ### API
 
-| Метод и путь                            | Что делает                                                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `POST /companies`, `GET /companies/:id` | компания и её кошелёк в одной транзакции; дубль email без учёта регистра - 409                                            |
-| `POST /companies/:id/wallet/deposits`   | **пополнение** по банковскому уведомлению (администратор): журнал и баланс в одной транзакции; повтор - 409               |
-| `POST /lots`                            | лот, первые строки истории, способы доставки                                                                              |
-| `PATCH /lots/:id/publication`, `/stock` | публикация или скрытие; остаток меняется на **дельту** (`{ "delta": 5 }`), не на итог; каждое изменение пишется в историю |
-| `PATCH /lots/:id/price`                 | **смена цены**: новая цена и строка истории вместе                                                                        |
-| `POST /deals`                           | **покупка**: транзакция и `SELECT ... FOR UPDATE` лота и кошельков; нет остатка или денег - 409                           |
+| Метод и путь                            | Что делает                                                                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /companies`, `GET /companies/:id` | компания и её кошелёк в одной транзакции; дубль email без учёта регистра - 409                                                       |
+| `POST /companies/:id/wallet/deposits`   | **пополнение** по банковскому уведомлению (администратор): журнал и баланс в одной транзакции; повтор - 409                          |
+| `GET /lots`                             | **каталог**: только опубликованные лоты, новые сверху; `q` ищет в названии лота, имени и email продавца; страницы по курсору `after` |
+| `POST /lots`                            | лот, первые строки истории, способы доставки                                                                                         |
+| `PATCH /lots/:id/publication`, `/stock` | публикация или скрытие; остаток меняется на **дельту** (`{ "delta": 5 }`), не на итог; каждое изменение пишется в историю            |
+| `PATCH /lots/:id/price`                 | **смена цены**: новая цена и строка истории вместе                                                                                   |
+| `POST /deals`                           | **покупка**: транзакция и `SELECT ... FOR UPDATE` лота и кошельков; нет остатка или денег - 409                                      |
 
 Ошибки всегда `{ statusCode, code, message }`: `400` валидация, `404` нет записи, `409` нарушено правило (уникальность, остаток, деньги), `422` связанной записи нет или покупка своего лота. Примеры запросов - в `requests.http`.
 
@@ -188,6 +190,7 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 - **Покупка без блокировки** даёт две сделки на одну штуку (шаг 2, на отдельной базе без одного триггера цепочки остатка: две сделки и деньги списаны дважды; на обычной базе схема сама не даёт продать лишнее - шаг 2б), **с `FOR UPDATE`** - одну, второй покупатель получает 409 (шаг 3). Ожидание блокировки в тестах - по `pg_blocking_pids`, без `sleep`. Плюс: денег на один лот при двух разных; смена цены во время покупки; встречные покупки A↔B ×20 без дедлока, сумма денег не меняется.
 - **Схема**: каждое из четырёх правил целостности и дополнительные ограничения проверяются прямыми запросами к базе, в том числе баланс только через журнал, условия сделки, цепочка истории остатка, append-only всех пяти журналов и тайм-ауты на соединениях.
 - **Склад**: изменение остатка дельтой, отказ при уходе ниже нуля, два изменения одновременно не теряются.
+- **Каталог**: скрытые лоты не видны, порядок «новые сверху», поиск по продавцу без учёта регистра, `%` и `_` в запросе ищутся буквально, курсор не пропускает и не повторяет лоты, даже если между страницами добавили новый.
 
 ### Приёмочный прогон
 

@@ -32,3 +32,14 @@ export type Stock = z.infer<typeof stockSchema>;
 
 export const priceSchema = z.object({ price: cents(MAX_PRICE) });
 export type Price = z.infer<typeof priceSchema>;
+
+export const MAX_CATALOG_PAGE = 100;
+
+// Query string values arrive as text, hence the coercion of `limit`.
+export const catalogSchema = z.object({
+  q: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_CATALOG_PAGE).default(20),
+  // Keyset cursor: the id of the last lot on the previous page.
+  after: uuid().optional(),
+});
+export type Catalog = z.infer<typeof catalogSchema>;
