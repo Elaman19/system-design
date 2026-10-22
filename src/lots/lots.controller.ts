@@ -1,13 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import {
   Body,
   Controller,
   Get,
+  Ip,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
+import { clientIp } from '../common/client-ip.js';
+import { ViewEventsPublisher } from '../clickstream/view-events.publisher.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import {
   catalogSchema,
@@ -25,11 +29,28 @@ import { LotsService } from './lots.service.js';
 
 @Controller('lots')
 export class LotsController {
-  constructor(private readonly lots: LotsService) {}
+  constructor(
+    private readonly lots: LotsService,
+    private readonly views: ViewEventsPublisher,
+  ) {}
 
   @Get()
   catalog(@Query(new ZodValidationPipe(catalogSchema)) query: Catalog) {
     return this.lots.catalog(query);
+  }
+
+  /** The lot card. Every view of a published lot becomes an event in Kafka (fire and forget). */
+  @Get(':id')
+  async card(@Param('id', ParseUUIDPipe) id: string, @Ip() ip: string) {
+    const lot = await this.lots.card(id);
+    this.views.record({
+      viewId: randomUUID(),
+      lotId: lot.id,
+      ip: clientIp(ip),
+      userId: null,
+      viewedAt: new Date().toISOString(),
+    });
+    return lot;
   }
 
   @Post()

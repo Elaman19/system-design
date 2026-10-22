@@ -4,6 +4,7 @@ import { Logger } from 'nestjs-pino';
 import pino from 'pino';
 import { AppModule } from './app.module.js';
 import { loadEnv } from './config/env.js';
+import { configureHttp } from './config/http.js';
 import { baseLogOptions } from './config/logger.config.js';
 import { nestLogger } from './config/nest-logger.js';
 
@@ -27,6 +28,7 @@ async function bootstrap() {
       logger: nestLogger(logger),
     });
     app.useLogger(app.get(Logger));
+    configureHttp(app, env);
     // useProcessExit: exit via process.exit() so pino flushes the last hook logs
     // (the default re-raises the signal and can drop buffered stdout).
     app.enableShutdownHooks(undefined, { useProcessExit: true });

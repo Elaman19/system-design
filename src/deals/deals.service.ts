@@ -134,6 +134,15 @@ export class DealsService {
         [buyer.id, (-total).toString(), seller.id, deal.id, total.toString()],
       );
 
+      // The receipt is announced in the deal's own transaction: deal and announcement
+      // commit together or not at all. The relay turns the row into a queue job later,
+      // so a Redis outage never fails or loses a purchase.
+      await rows(
+        em,
+        `INSERT INTO outbox (kind, aggregate_id) VALUES ('deal.receipt', $1)`,
+        [deal.id],
+      );
+
       return {
         id: deal.id,
         lotId,

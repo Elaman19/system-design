@@ -6,23 +6,16 @@ import {
   Query,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { ENV, type Env } from './config/env.js';
-import { AppService } from './app.service.js';
+import { ENV, type Env } from '../config/env.js';
 
 const MAX_WORK_MS = 5000;
 
 @Controller()
-export class AppController {
+export class WorkController {
   constructor(
-    private readonly appService: AppService,
     private readonly dataSource: DataSource,
     @Inject(ENV) private readonly env: Env,
   ) {}
-
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
 
   /** Slow request holding a DB connection; used to verify graceful shutdown. Opt-in via WORK_ENDPOINT_ENABLED. */
   @Get('work')

@@ -15,3 +15,39 @@ describe('shutdown timings', () => {
     expect(grace * 1000).toBeGreaterThan(budgetMs);
   });
 });
+
+describe('background processes in compose', () => {
+  const compose = readFileSync(new URL('docker-compose.yml', root), 'utf8');
+  /** The text of one top-level service: from its header to the next service. */
+  const service = (name: string) => {
+    const start = compose.indexOf(`\n  ${name}:\n`);
+    const rest = compose.slice(start + 1);
+    const next = rest.slice(1).search(/\n {2}[a-z][\w-]*:\n|\nvolumes:/);
+    return rest.slice(0, next + 1);
+  };
+
+  it('runs the scheduler as a single copy: no replicas, no scale', () => {
+    expect(compose).not.toMatch(/replicas:|scale:/);
+    expect(service('scheduler')).toContain('dist/entrypoints/scheduler.js');
+  });
+
+  it('the API does not wait for Redis, Kafka or the mail catcher: it must serve without them', () => {
+    const app = service('app');
+    // Sanity check of the slice itself: it does contain what the API does wait for.
+    expect(app).toMatch(/\n {6}postgres:\n/);
+    for (const dependency of ['redis', 'kafka', 'mailpit']) {
+      expect(app).not.toMatch(new RegExp(`\\n {6}${dependency}:\\n`));
+    }
+  });
+
+  it.each([
+    'outbox-relay',
+    'worker',
+    'clickstream-archiver',
+    'abuse-detector',
+    'ban-recorder',
+    'scheduler',
+  ])('%s is a container of its own with its own entry point', (name) => {
+    expect(service(name)).toContain(`dist/entrypoints/${name}.js`);
+  });
+});

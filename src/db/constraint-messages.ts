@@ -27,6 +27,9 @@ export const CONSTRAINT_MESSAGES: Record<string, string> = {
   lot_stock_history_deal_delta: 'Движение остатка не сходится со сделкой',
   wallets_balance_non_negative: 'Недостаточно средств на кошельке',
   lots_stock_non_negative: 'Недостаточно товара на складе',
+  outbox_kind_aggregate_id_key: 'Событие по этой записи уже поставлено',
+  ip_bans_no_overlap: 'Для этого IP уже действует бан',
+  deal_receipts_append_only: 'Журнал чеков не изменяется',
 };
 
 export const FALLBACK_UNIQUE_MESSAGE = 'Такая запись уже существует';

@@ -10,12 +10,14 @@ import {
 import { AppModule } from '../../src/app.module.js';
 import { TxHooks, type TxPoint } from '../../src/common/tx-hooks/tx-hooks.js';
 import { ENV, type Env, loadEnv } from '../../src/config/env.js';
+import { configureHttp } from '../../src/config/http.js';
 import { InitMarketplace1760400000000 } from '../../src/migrations/1760400000000-InitMarketplace.js';
 import { DealLedgerInvariant1760500000000 } from '../../src/migrations/1760500000000-DealLedgerInvariant.js';
 import { AppendOnlyLedger1760600000000 } from '../../src/migrations/1760600000000-AppendOnlyLedger.js';
 import { EnforceDealRules1760700000000 } from '../../src/migrations/1760700000000-EnforceDealRules.js';
 import { CompanyWalletJournalTime1760800000000 } from '../../src/migrations/1760800000000-CompanyWalletJournalTime.js';
 import { LotsCatalogIndex1760900000000 } from '../../src/migrations/1760900000000-LotsCatalogIndex.js';
+import { BackgroundJobs1761000000000 } from '../../src/migrations/1761000000000-BackgroundJobs.js';
 
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -39,13 +41,15 @@ export interface Harness {
 /** The app on `app_test`, or with `env` overridden (e.g. another test database). */
 export async function createHarness(env: Partial<Env> = {}): Promise<Harness> {
   const hooks = new TestHooks();
+  const merged = { ...loadEnv(), ...env };
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(TxHooks)
     .useValue(hooks)
     .overrideProvider(ENV)
-    .useValue({ ...loadEnv(), ...env })
+    .useValue(merged)
     .compile();
   const app = moduleRef.createNestApplication();
+  configureHttp(app, merged);
   await app.listen(0, '127.0.0.1');
   return {
     app,
@@ -67,6 +71,7 @@ export const MIGRATIONS = [
   EnforceDealRules1760700000000,
   CompanyWalletJournalTime1760800000000,
   LotsCatalogIndex1760900000000,
+  BackgroundJobs1761000000000,
 ];
 
 /**

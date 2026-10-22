@@ -1,3 +1,23 @@
+# Every Node process of the system runs from the same image; only the command
+# differs. Variables that must point at sibling containers (the host-oriented
+# .env says localhost) are overridden once here and merged into each service.
+x-in-network-env: &in-network-env
+  NODE_ENV: production
+  DB_HOST: postgres
+  REDIS_URL: redis://redis:6379
+  OPENSEARCH_URL: http://opensearch:9200
+  S3_ENDPOINT: http://seaweedfs:8333
+  KAFKA_BROKERS: kafka:9092
+  MAIL_SMTP_URL: smtp://mailpit:1025
+
+x-node-process: &node-process
+  build: .
+  env_file: .env
+  environment:
+    <<: *in-network-env
+  restart: unless-stopped
+  stop_grace_period: 30s
+
 services:
   app:
     build: .
@@ -11,13 +31,12 @@ services:
       # everything else (credentials, PORT, ...).
       # - This container runs the built production artifact (Dockerfile strips
       #   devDependencies, incl. pino-pretty), so it must run as production.
-      NODE_ENV: production
+      <<: *in-network-env
       # Local stack only: lets scripts/load.mjs exercise graceful shutdown.
       WORK_ENDPOINT_ENABLED: 'true'
-      DB_HOST: postgres
-      REDIS_URL: redis://redis:6379
-      OPENSEARCH_URL: http://opensearch:9200
-      S3_ENDPOINT: http://seaweedfs:8333
+      # Local stack only: lets scripts/clickstream-load.mjs pick the visitor IP with
+      # X-Forwarded-For. Behind a real balancer, trust only its address.
+      TRUST_PROXY: 'true'
     # /ready (not /live): the container is "healthy" only while it can serve
     # traffic. Compose never restarts an unhealthy container by itself, so a
     # dependency outage flips health without a restart.
@@ -35,12 +54,13 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       opensearch:
         condition: service_healthy
       seaweedfs:
         condition: service_healthy
+    # No depends_on on redis, kafka or mailpit: the API must keep working
+    # without them. Purchases leave a row in the outbox for the relay to pick up,
+    # views are buffered and dropped when Kafka is away (see docs/background).
 
   # Schema changes are a separate step, not something the app does on startup:
   # a one-shot job from the same image, applied before `app` starts. Re-running
@@ -63,6 +83,81 @@ services:
     restart: 'no'
     depends_on:
       postgres:
+        condition: service_healthy
+
+  # --- Background processes -------------------------------------------------
+  # Same image, own container each: they scale and fail independently of the API.
+
+  # Moves rows of the outbox table into the BullMQ queue (FOR UPDATE SKIP LOCKED,
+  # so several copies would not take the same row).
+  outbox-relay:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/outbox-relay.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # BullMQ consumer: sends receipts, ban alerts and the daily report.
+  worker:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/worker.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  # Group clickstream-archiver: lot-views -> files in S3.
+  clickstream-archiver:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/clickstream-archiver.js']
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      seaweedfs:
+        condition: service_healthy
+
+  # Group abuse-detector: lot-views -> ip-bans.
+  abuse-detector:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/abuse-detector.js']
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  # Group ip-ban-recorder: ip-bans -> Postgres + BullMQ job "mail the admin".
+  ban-recorder:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/ban-recorder.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # Fires the daily report. EXACTLY ONE copy, never scale it: every copy has its own
+  # timer, so N copies mean N reports a day. API and workers scale, the scheduler does not.
+  scheduler:
+    <<: *node-process
+    command: ['node', 'dist/entrypoints/scheduler.js']
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Creates the Kafka topics (3 partitions, retention) before anyone reads them,
+  # like `migrate` does for Postgres. Re-running is safe.
+  kafka-init:
+    <<: *node-process
+    restart: 'no'
+    command: ['node', 'dist/entrypoints/kafka-topics.js']
+    depends_on:
+      kafka:
         condition: service_healthy
 
   # Images are pinned to an exact version: a floating tag (`latest`, `17-alpine`) pulls
@@ -122,7 +217,11 @@ services:
   # S3 client still needs to send, not values SeaweedFS actually checks.
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
-    command: server -dir=/data -s3 -s3.port=8333
+    # Every bucket is a "collection" with volumes of its own (7 at a time), and a single
+    # server defaults to a handful of volumes sized for a big disk: after a few buckets
+    # PUT fails with "No writable volumes". Small volumes and a high cap keep a local
+    # stack (and one test bucket per test) working.
+    command: server -dir=/data -s3 -s3.port=8333 -master.volumeSizeLimitMB=64 -volume.max=500
     ports:
       - '8333:8333' # S3 API
       - '8888:8888' # filer UI/API (browse stored objects)
@@ -134,7 +233,57 @@ services:
       timeout: 5s
       retries: 10
 
+  # Single-node KRaft broker (no ZooKeeper). Two listeners: kafka:9092 for
+  # containers, localhost:9094 for the host (tests, kafka-*.sh from outside).
+  # Topics are not auto-created: a typo in a topic name must fail, not
+  # silently create a one-partition topic.
+  kafka:
+    image: apache/kafka:4.2.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      # One broker: the internal topics cannot have more replicas.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Do not wait for more members before the first rebalance of a group.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - '9094:9094'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1',
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+
+  # Catches every outgoing mail: nothing leaves the machine. SMTP 1025, web UI 8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
   opensearch-data:
   seaweedfs-data:
+  kafka-data:

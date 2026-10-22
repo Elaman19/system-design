@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 
 export type TxPoint =
-  'deposit:afterJournalInsert' | 'price:afterUpdate' | 'purchase:afterRead';
+  | 'deposit:afterJournalInsert'
+  | 'outbox:afterEnqueue'
+  | 'price:afterUpdate'
+  | 'purchase:afterRead';
 
 /**
  * Test seam. Production does nothing here; tests replace it to pause a

@@ -3,8 +3,8 @@ import { INestApplication } from '@nestjs/common';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import request from 'supertest';
-import { AppModule } from './../src/app.module.js';
-import { ShutdownService } from './../src/health/shutdown.service.js';
+import { AppModule } from '../../src/app.module.js';
+import { ShutdownService } from '../../src/health/shutdown.service.js';
 
 // Plain http (no global proxy dispatcher, no keep-alive) so a refused
 // connection surfaces as ECONNREFUSED instead of a proxy error.
@@ -30,7 +30,7 @@ async function createApp(): Promise<INestApplication> {
   return app;
 }
 
-describe('AppController (e2e)', () => {
+describe('health and /work (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -39,13 +39,6 @@ describe('AppController (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
-  });
-
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
   });
 
   it('/live (GET) is 200', () => {
@@ -59,11 +52,11 @@ describe('AppController (e2e)', () => {
 
   it('echoes a valid x-request-id and generates one otherwise', async () => {
     const echoed = await request(app.getHttpServer())
-      .get('/')
+      .get('/live')
       .set('x-request-id', 'abc-123');
     expect(echoed.headers['x-request-id']).toBe('abc-123');
 
-    const generated = await request(app.getHttpServer()).get('/');
+    const generated = await request(app.getHttpServer()).get('/live');
     expect(generated.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
   });
 

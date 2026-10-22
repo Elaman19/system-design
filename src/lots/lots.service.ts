@@ -97,6 +97,27 @@ export class LotsService {
     };
   }
 
+  /** One published lot as a buyer sees it; a hidden or unknown lot is a 404. */
+  async card(id: string) {
+    const [lot] = await rows<CatalogRow>(
+      this.dataSource.manager,
+      `SELECT l.id, l.seller_id, c.name AS seller_name, l.title, l.price, l.stock,
+              l.is_published,
+              coalesce((SELECT array_agg(m.method ORDER BY m.method)
+                          FROM lot_delivery_methods m WHERE m.lot_id = l.id),
+                       '{}') AS delivery_methods
+         FROM lots l JOIN companies c ON c.id = l.seller_id
+        WHERE l.id = $1 AND l.is_published`,
+      [id],
+    );
+    if (!lot) throw lotNotFound();
+    return {
+      ...view(lot),
+      sellerName: lot.seller_name,
+      deliveryMethods: lot.delivery_methods,
+    };
+  }
+
   /**
    * Current state in `lots`, plus the first row of every history table. Current
    * state and history are written together or not at all.
