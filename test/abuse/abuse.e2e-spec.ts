@@ -141,6 +141,7 @@ describe('abuse detection: lot-views -> detector -> ip-bans -> recorder -> 429',
       service: AbuseDetectorService,
       ip: string,
       times: number[],
+      partition = 0,
     ) => {
       for (const at of times) {
         await service.handle(
@@ -151,7 +152,7 @@ describe('abuse detection: lot-views -> detector -> ip-bans -> recorder -> 429',
             userId: null,
             viewedAt: new Date(at).toISOString(),
           }),
-          { partition: 0, offset: offset++, leaderEpoch: 0 },
+          { partition, offset: offset++, leaderEpoch: 0 },
         );
       }
     };
@@ -235,6 +236,82 @@ describe('abuse detection: lot-views -> detector -> ip-bans -> recorder -> 429',
         first[0].value,
         first[0].value,
       ]);
+    });
+
+    it('a partition that is ahead in time does not make the detector forget the views of one that is behind', async () => {
+      const { service, env } = await detector();
+      const ip = randomIp();
+      const start = Date.now() - 20 * 60_000;
+
+      await feed(service, ip, every(200, start, 10)); // partition 0, lagging
+      // Partition 1 is ten minutes further on; then the housekeeping tick runs.
+      await feed(service, randomIp(), [start + 10 * 60_000], 1);
+      await service.housekeeping();
+      await feed(service, ip, every(101, start + 2000, 10)); // 301 in the same minute
+
+      const [message] = await readMessages(env.KAFKA_TOPIC_IP_BANS, 1);
+      expect(message.key).toBe(ip);
+    });
+
+    it('commits the start of the window, not the last handled view: a restart can read the window again', async () => {
+      const { service, env } = await detector();
+      const start = Date.now() - 20 * 60_000;
+      offset = 100n;
+
+      // Views at 0 s, 10 s, 20 s, 70 s and 80 s: with a 60 s window the last two bring the
+      // newest view to 80 s, and only the views after 20 s are still counted.
+      await feed(
+        service,
+        randomIp(),
+        [0, 10, 20, 70, 80].map((s) => start + s * 1000),
+        1,
+      );
+      await service.commitProcessed();
+
+      expect(
+        (await committed(ABUSE_DETECTOR_GROUP, env.KAFKA_TOPIC_LOT_VIEWS))[1],
+      ).toBe(103n);
+    });
+
+    it('300 views, a restart, the 301st view: the new process counts the 300 again and bans', async () => {
+      const first = await detector();
+      const handled = vi.spyOn(first.service, 'handle');
+      const ip = randomIp();
+      const start = Date.now() - 20_000;
+      const view = (at: number) => ({
+        key: ip,
+        value: JSON.stringify({
+          viewId: randomUUID(),
+          lotId: randomUUID(),
+          ip,
+          userId: null,
+          viewedAt: new Date(at).toISOString(),
+        }),
+      });
+
+      await produce(
+        first.env.KAFKA_TOPIC_LOT_VIEWS,
+        every(300, start, 10).map(view),
+      );
+      await eventually(
+        () => handled.mock.calls.length === 300,
+        'all 300 views',
+      );
+      await Promise.all(handled.mock.results.map((r) => r.value));
+      await first.service.commitProcessed();
+      await first.p.close();
+      processes.splice(processes.indexOf(first.p), 1);
+      expect(
+        await readMessages(first.env.KAFKA_TOPIC_IP_BANS, 1, 1500),
+      ).toHaveLength(0);
+
+      // The 301st view arrives while no detector is running.
+      await produce(first.env.KAFKA_TOPIC_LOT_VIEWS, [view(start + 300 * 10)]);
+      processes.push(await startProcess([AbuseDetectorModule], first.env));
+
+      const [message] = await readMessages(first.env.KAFKA_TOPIC_IP_BANS, 1);
+      expect(message.key).toBe(ip);
+      expect(JSON.parse(message.value)).toMatchObject({ ip, views: 301 });
     });
 
     it('a view that is not valid JSON or has the wrong shape is skipped, the offset still moves on', async () => {

@@ -29,14 +29,21 @@ export class Stoppable {
  * Runs `work` until it succeeds, pausing 1 s, 2 s, 4 s ... (capped at `maxDelayMs`)
  * between attempts. For consumers that must not skip a message: the offset stays
  * where it is until the work is done. Returns false if stopped before it succeeded.
+ * With `atLeastOnce` the first attempt is made even if already stopped, for work that
+ * finishes something under way (a commit after a file that is already written).
  */
 export async function retryUntilDone(
   work: () => Promise<void>,
   control: Stoppable,
   onError: (error: unknown, attempt: number) => void,
   maxDelayMs = 30_000,
+  atLeastOnce = false,
 ): Promise<boolean> {
-  for (let attempt = 1; !control.isStopped; attempt++) {
+  for (
+    let attempt = 1;
+    !control.isStopped || (atLeastOnce && attempt === 1);
+    attempt++
+  ) {
     try {
       await work();
       return true;

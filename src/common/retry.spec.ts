@@ -98,4 +98,22 @@ describe('retryUntilDone', () => {
     expect(await retryUntilDone(work, control, () => undefined)).toBe(false);
     expect(work).not.toHaveBeenCalled();
   });
+
+  it('with atLeastOnce, tries once even when already stopped, and does not retry', async () => {
+    const control = new Stoppable();
+    control.stop();
+    const ok = vi.fn(async () => undefined);
+    const failing = vi.fn(async () => {
+      throw new Error('x');
+    });
+
+    expect(await retryUntilDone(ok, control, () => undefined, 1000, true)).toBe(
+      true,
+    );
+    expect(
+      await retryUntilDone(failing, control, () => undefined, 1000, true),
+    ).toBe(false);
+    expect(ok).toHaveBeenCalledOnce();
+    expect(failing).toHaveBeenCalledOnce();
+  });
 });

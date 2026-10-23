@@ -5,40 +5,52 @@
  *
  * The window of a key ends at its newest view. Events of one IP arrive nearly in order
  * (one partition), so inserting keeps the list sorted and costs O(1) in the usual case.
+ *
+ * Time is tracked per partition: Kafka orders events inside a partition only, and a
+ * partition that is behind still delivers old events after another one has moved on.
+ * A key is forgotten when its own partition has moved a whole window past its last view.
  */
 export class SlidingWindow {
-  private readonly times = new Map<string, number[]>();
-  private newest = 0;
+  private readonly keys = new Map<
+    string,
+    { times: number[]; partition: number }
+  >();
+  private readonly newest = new Map<number, number>();
 
   constructor(private readonly windowMs: number) {}
 
   /** Records a view at `at` (ms) and returns how many views the key has in its window. */
-  add(key: string, at: number): number {
-    const list = this.times.get(key) ?? [];
-    this.times.set(key, list);
-    if (list.length === 0 || at >= list[list.length - 1]) {
-      list.push(at);
+  add(key: string, partition: number, at: number): number {
+    const entry = this.keys.get(key) ?? { times: [], partition };
+    this.keys.set(key, entry);
+    entry.partition = partition;
+    const { times } = entry;
+    if (times.length === 0 || at >= times[times.length - 1]) {
+      times.push(at);
     } else {
-      list.splice(list.findLastIndex((t) => t <= at) + 1, 0, at);
+      times.splice(times.findLastIndex((t) => t <= at) + 1, 0, at);
     }
-    this.newest = Math.max(this.newest, at);
-    const edge = list[list.length - 1] - this.windowMs;
+    this.newest.set(partition, Math.max(this.newest.get(partition) ?? 0, at));
+    const edge = times[times.length - 1] - this.windowMs;
     let expired = 0;
-    while (list[expired] <= edge) expired++;
-    list.splice(0, expired);
-    return list.length;
+    while (times[expired] <= edge) expired++;
+    times.splice(0, expired);
+    return times.length;
   }
 
-  /** Forgets keys whose newest view is out of the window of the newest event seen. */
+  /** Forgets keys whose newest view is out of the window of the newest event of their partition. */
   prune() {
-    for (const [key, list] of this.times) {
-      if (list[list.length - 1] <= this.newest - this.windowMs) {
-        this.times.delete(key);
+    for (const [key, { times, partition }] of this.keys) {
+      if (
+        times[times.length - 1] <=
+        this.newest.get(partition)! - this.windowMs
+      ) {
+        this.keys.delete(key);
       }
     }
   }
 
   get size() {
-    return this.times.size;
+    return this.keys.size;
   }
 }

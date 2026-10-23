@@ -182,6 +182,15 @@ services:
 
   redis:
     image: redis:7.4.11-alpine
+    # The queue is the only copy of a job: the outbox relay marks the row published as soon
+    # as `queue.add` returns. Without the append-only file, Redis keeps only periodic
+    # snapshots and a restart or crash drops every job added since the last one, with no
+    # row left to add it again. `always` syncs the file before the command is answered, so
+    # a job that `add` accepted survives a restart; the price is one disk sync per queue
+    # command, which the receipt/mail/report volume does not notice.
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'always']
+    volumes:
+      - redis-data:/data
     ports:
       - '6379:6379'
     healthcheck:
@@ -284,6 +293,7 @@ services:
 
 volumes:
   pgdata:
+  redis-data:
   opensearch-data:
   seaweedfs-data:
   kafka-data:

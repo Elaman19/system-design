@@ -7,11 +7,13 @@ import {
 import type { Consumer, Producer } from '@platformatic/kafka';
 import { PinoLogger } from 'nestjs-pino';
 import { viewEventSchema } from '../clickstream/view-event.js';
+import { ProcessFailure } from '../common/process-failure.js';
 import { Stoppable, retryUntilDone } from '../common/retry.js';
 import { ENV, type Env } from '../config/env.js';
 import { createConsumer, createProducer } from '../kafka/clients.js';
 import { readStream } from '../kafka/read-stream.js';
 import { SlidingWindow } from './sliding-window.js';
+import { type Position, WindowTail } from './window-tail.js';
 
 export const ABUSE_DETECTOR_GROUP = 'abuse-detector';
 
@@ -22,11 +24,6 @@ export interface BanEvent {
   views: number;
 }
 
-interface Position {
-  offset: bigint;
-  leaderEpoch: number;
-}
-
 const HOUSEKEEPING_EVERY_MS = 1000;
 
 /**
@@ -34,12 +31,15 @@ const HOUSEKEEPING_EVERY_MS = 1000;
  * publishes a ban to `ip-bans` when an IP exceeds ABUSE_MAX_VIEWS.
  *
  * The count lives in memory. That is correct only because the topic is keyed by IP: all
- * views of one IP sit in one partition and reach one copy of the detector. A restart
- * resumes from the committed offset and the window starts empty, so a ban can come up to
- * one window late; that is the price of not storing counters anywhere.
+ * views of one IP sit in one partition and reach one copy of the detector. To survive a
+ * restart without storing counters anywhere, the committed offset is not "after the last
+ * handled view" but the oldest view still inside the window (see WindowTail): a restart
+ * re-reads one window of views and rebuilds the counters. The price is that the group
+ * always shows a lag of about one window, and that bans of the replayed views are
+ * published again (see below).
  *
  * The ban event is a pure function of the event that crossed the limit (its time and the
- * configured durations), so a replay after a crash produces the identical message and the
+ * configured durations), so a replay after a restart produces the identical message and the
  * consumer of `ip-bans` can safely see it twice.
  */
 @Injectable()
@@ -49,6 +49,7 @@ export class AbuseDetectorService
   readonly consumer: Consumer<string, string, string, string>;
   private readonly producer: Producer<string, string, string, string>;
   private readonly window: SlidingWindow;
+  private readonly tail: WindowTail;
   private readonly bannedUntil = new Map<string, number>();
   private readonly processed = new Map<number, Position>();
   private readonly control = new Stoppable();
@@ -58,11 +59,13 @@ export class AbuseDetectorService
   constructor(
     @Inject(ENV) private readonly env: Env,
     private readonly logger: PinoLogger,
+    private readonly failure: ProcessFailure,
   ) {
     this.logger.setContext(AbuseDetectorService.name);
     this.consumer = createConsumer(env, ABUSE_DETECTOR_GROUP);
     this.producer = createProducer(env);
     this.window = new SlidingWindow(env.ABUSE_WINDOW_MS);
+    this.tail = new WindowTail(env.ABUSE_WINDOW_MS);
   }
 
   async onApplicationBootstrap() {
@@ -87,7 +90,7 @@ export class AbuseDetectorService
           leaderEpoch: message.leaderEpoch,
         }),
       this.control,
-      this.logger,
+      this.failure,
       'detector read loop failed',
     );
   }
@@ -113,13 +116,15 @@ export class AbuseDetectorService
         'unparseable view event skipped',
       );
     } else {
-      await this.count(parsed.data.ip, Date.parse(parsed.data.viewedAt));
+      const viewedAt = Date.parse(parsed.data.viewedAt);
+      this.tail.add(at.partition, viewedAt, at);
+      await this.count(parsed.data.ip, at.partition, viewedAt);
     }
     this.processed.set(at.partition, at);
   }
 
-  private async count(ip: string, viewedAt: number) {
-    const views = this.window.add(ip, viewedAt);
+  private async count(ip: string, partition: number, viewedAt: number) {
+    const views = this.window.add(ip, partition, viewedAt);
     if (views <= this.env.ABUSE_MAX_VIEWS) return;
     // Already banned by an earlier event of this IP.
     if (viewedAt < (this.bannedUntil.get(ip) ?? 0)) return;
@@ -169,14 +174,24 @@ export class AbuseDetectorService
     }
   }
 
-  /** Commits what has been handled so far; on failure the next tick commits again. */
+  /**
+   * Commits how far the partitions have been handled, held back to the start of the window:
+   * the oldest view still counted, or the next one to read when the window is empty (only
+   * unparseable views were handled). On failure the next tick commits again.
+   */
   async commitProcessed() {
-    const offsets = [...this.processed].map(([partition, p]) => ({
-      topic: this.env.KAFKA_TOPIC_LOT_VIEWS,
-      partition,
-      offset: p.offset + 1n,
-      leaderEpoch: p.leaderEpoch,
-    }));
+    const offsets = [...this.processed].map(([partition, p]) => {
+      const from = this.tail.start(partition) ?? {
+        offset: p.offset + 1n,
+        leaderEpoch: p.leaderEpoch,
+      };
+      return {
+        topic: this.env.KAFKA_TOPIC_LOT_VIEWS,
+        partition,
+        offset: from.offset,
+        leaderEpoch: from.leaderEpoch,
+      };
+    });
     this.processed.clear();
     if (offsets.length === 0) return;
     try {

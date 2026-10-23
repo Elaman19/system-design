@@ -1,10 +1,10 @@
-import type { PinoLogger } from 'nestjs-pino';
+import type { ProcessFailure } from '../common/process-failure.js';
 import { Stoppable } from '../common/retry.js';
 import { readStream } from './read-stream.js';
 
-const logger = () =>
-  ({ error: vi.fn() }) as unknown as PinoLogger & {
-    error: ReturnType<typeof vi.fn>;
+const failure = () =>
+  ({ fatal: vi.fn() }) as unknown as ProcessFailure & {
+    fatal: ReturnType<typeof vi.fn>;
   };
 
 async function* failing() {
@@ -25,32 +25,29 @@ describe('readStream', () => {
         seen.push(m);
       },
       new Stoppable(),
-      logger(),
+      failure(),
       'x',
     );
 
     expect(seen).toEqual([1, 2, 3]);
   });
 
-  it('logs a failing stream and returns', async () => {
-    const log = logger();
+  it('reports a failing stream as fatal: nothing is read any more, the process has to restart', async () => {
+    const fail = failure();
 
     await readStream(
       failing(),
       async () => undefined,
       new Stoppable(),
-      log,
+      fail,
       'reader failed',
     );
 
-    expect(log.error).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      'reader failed',
-    );
+    expect(fail.fatal).toHaveBeenCalledWith(expect.any(Error), 'reader failed');
   });
 
   it('is silent about a stream that fails during shutdown', async () => {
-    const log = logger();
+    const fail = failure();
     const control = new Stoppable();
     control.stop();
 
@@ -58,10 +55,10 @@ describe('readStream', () => {
       failing(),
       async () => undefined,
       control,
-      log,
+      fail,
       'reader failed',
     );
 
-    expect(log.error).not.toHaveBeenCalled();
+    expect(fail.fatal).not.toHaveBeenCalled();
   });
 });

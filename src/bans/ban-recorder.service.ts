@@ -10,6 +10,7 @@ import type { Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { DataSource } from 'typeorm';
 import { z } from 'zod';
+import { ProcessFailure } from '../common/process-failure.js';
 import { Stoppable, retryUntilDone } from '../common/retry.js';
 import { withTimeout } from '../common/with-timeout.js';
 import { ENV, type Env } from '../config/env.js';
@@ -66,6 +67,7 @@ export class BanRecorderService
     @InjectQueue(MAIL_QUEUE) private readonly queue: Queue,
     private readonly logger: PinoLogger,
     @Inject(ENV) private readonly env: Env,
+    private readonly failure: ProcessFailure,
   ) {
     this.logger.setContext(BanRecorderService.name);
     this.consumer = createConsumer(env, BAN_RECORDER_GROUP);
@@ -94,7 +96,7 @@ export class BanRecorderService
         if (done) await message.commit();
       },
       this.control,
-      this.logger,
+      this.failure,
       'ban recorder read loop failed',
     );
   }

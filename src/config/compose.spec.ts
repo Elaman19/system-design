@@ -31,6 +31,14 @@ describe('background processes in compose', () => {
     expect(service('scheduler')).toContain('dist/entrypoints/scheduler.js');
   });
 
+  it('Redis keeps the queue on a volume with an append-only file synced on every command: an accepted job survives a restart', () => {
+    const redis = service('redis');
+
+    expect(redis).toContain("'--appendonly', 'yes'");
+    expect(redis).toContain("'--appendfsync', 'always'");
+    expect(redis).toMatch(/redis-data:\/data/);
+  });
+
   it('the API does not wait for Redis, Kafka or the mail catcher: it must serve without them', () => {
     const app = service('app');
     // Sanity check of the slice itself: it does contain what the API does wait for.

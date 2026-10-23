@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
+import { ProcessFailureModule } from './common/process-failure.js';
 import { ENV, type Env } from './config/env.js';
 import { EnvModule } from './config/env.module.js';
 import { loggerConfig } from './config/logger.config.js';
@@ -12,6 +13,7 @@ import { loggerConfig } from './config/logger.config.js';
 @Module({
   imports: [
     EnvModule,
+    ProcessFailureModule,
     LoggerModule.forRootAsync({
       inject: [ENV],
       useFactory: (env: Env) => loggerConfig(env),

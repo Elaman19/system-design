@@ -115,7 +115,7 @@ describe('clickstream archive: lot-views -> S3', () => {
     expect(keys).toHaveLength(3);
     for (const key of keys) {
       expect(key).toMatch(
-        new RegExp(`^clickstream/date=${today}/[0-2]-\\d+\\.jsonl$`),
+        new RegExp(`^clickstream/date=${today}/[0-2]-\\d+-\\d+\\.jsonl$`),
       );
     }
     expect(new Set(await allLines(bucket)).size).toBe(25);
@@ -126,12 +126,13 @@ describe('clickstream archive: lot-views -> S3', () => {
     );
   });
 
-  it('a batch is named after its partition and first offset; the folder is the day of the first view', () => {
+  it('a batch is named after its partition, first and last offset; the folder is the day of the first view', () => {
     const key = archiveKey(2, {
       firstOffset: 4000n,
+      lastOffset: 4999n,
       firstTimestamp: BigInt(Date.parse('2026-10-20T23:59:59Z')),
     });
-    expect(key).toBe('clickstream/date=2026-10-20/2-4000.jsonl');
+    expect(key).toBe('clickstream/date=2026-10-20/2-4000-4999.jsonl');
   });
 
   it('crash after the file is written but before the offset is committed: the replay overwrites the same file', async () => {
@@ -177,6 +178,203 @@ describe('clickstream archive: lot-views -> S3', () => {
     expect(await files(bucket)).toEqual([name]);
     expect(await lines(bucket, name)).toEqual(before);
     expect(await allLines(bucket)).toHaveLength(10);
+  });
+
+  const tenViews = () =>
+    Array.from({ length: 10 }, () => ({
+      key: '203.0.113.7',
+      value: event('203.0.113.7'),
+    }));
+
+  it("a replay cut at other places replaces the first run's file: no view is in the archive twice", async () => {
+    const topic = await newTopic('archive');
+    const bucket = newBucket();
+    const env = {
+      KAFKA_TOPIC_LOT_VIEWS: topic,
+      S3_BUCKET: bucket,
+      ARCHIVE_FLUSH_MS: 600_000,
+    };
+    const first = await archiver({ ...env, ARCHIVE_BATCH_SIZE: 10 });
+    vi.spyOn(first.get(ArchiverService).consumer, 'commit').mockRejectedValue(
+      new Error('killed'),
+    );
+    await produce(topic, tenViews());
+    await eventually(
+      async () => (await files(bucket)).length === 1,
+      "the first run's file",
+    );
+    await first.close();
+    processes.splice(processes.indexOf(first), 1);
+
+    // The restart batches by 5, not 10: two files where there was one.
+    await archiver({ ...env, ARCHIVE_BATCH_SIZE: 5 });
+    await eventually(
+      async () =>
+        (await committed(ARCHIVER_GROUP, topic)).some((o) => o === 10n),
+      'the replayed batches to be committed',
+    );
+
+    const keys = await eventually(async () => {
+      const keys = await files(bucket);
+      return keys.length === 2 && keys;
+    }, "the first run's file to be replaced by two");
+    expect(keys.every((k) => /-(0-4|5-9)\.jsonl$/.test(k))).toBe(true);
+    const all = await allLines(bucket);
+    expect(all).toHaveLength(10);
+    expect(new Set(all).size).toBe(10);
+  });
+
+  it('a commit that keeps failing holds the next batch back: nothing is written behind an uncommitted batch', async () => {
+    const topic = await newTopic('archive');
+    const bucket = newBucket();
+    const p = await archiver({
+      KAFKA_TOPIC_LOT_VIEWS: topic,
+      S3_BUCKET: bucket,
+      ARCHIVE_BATCH_SIZE: 5,
+      ARCHIVE_FLUSH_MS: 600_000,
+    });
+    const commit = vi
+      .spyOn(p.get(ArchiverService).consumer, 'commit')
+      .mockRejectedValueOnce(new Error('coordinator moved'))
+      .mockRejectedValueOnce(new Error('coordinator moved'));
+    await produce(topic, tenViews());
+
+    await eventually(() => commit.mock.calls.length >= 1, 'the first commit');
+    await eventually(
+      async () => (await files(bucket)).length === 1,
+      'the first file',
+    );
+    // The second batch is full and waiting, but the first is not committed yet.
+    await sleep(500);
+    expect(await files(bucket)).toHaveLength(1);
+
+    // The third attempt goes through, then the second batch is written.
+    await eventually(
+      async () =>
+        (await committed(ARCHIVER_GROUP, topic)).some((o) => o === 10n),
+      'both batches to be committed',
+    );
+    expect(commit).toHaveBeenCalledTimes(4);
+    const all = await allLines(bucket);
+    expect(all).toHaveLength(10);
+    expect(new Set(all).size).toBe(10);
+  });
+
+  it('a rebalance while the commit is being retried: the batch is left to the new owner, nothing is committed', async () => {
+    const topic = await newTopic('archive');
+    const p = await archiver({
+      KAFKA_TOPIC_LOT_VIEWS: topic,
+      S3_BUCKET: newBucket(),
+      ARCHIVE_BATCH_SIZE: 5,
+      ARCHIVE_FLUSH_MS: 600_000,
+    });
+    const service = p.get(ArchiverService);
+    const commit = vi
+      .spyOn(service.consumer, 'commit')
+      .mockRejectedValue(new Error('coordinator moved'));
+    await produce(topic, tenViews().slice(0, 5));
+    await eventually(() => commit.mock.calls.length === 1, 'the first commit');
+
+    service.consumer.emit('consumer:group:rebalance', {} as never);
+    await Promise.all(service['writes'].values());
+
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a PUT of the previous owner that lands late is a separate file: it cannot cut down the new owner's file", async () => {
+    const topic = await newTopic('archive');
+    const bucket = newBucket();
+    const client = s3();
+    const realSend = client.send.bind(client);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    let puts = 0;
+    (client as { send: unknown }).send = async (command: unknown) => {
+      if (command instanceof PutObjectCommand && puts++ === 0) {
+        held = true;
+        await gate; // the old owner's PUT is on the wire
+      }
+      return realSend(command as never);
+    };
+    const p = await archiver(
+      {
+        KAFKA_TOPIC_LOT_VIEWS: topic,
+        S3_BUCKET: bucket,
+        ARCHIVE_BATCH_SIZE: 5,
+        ARCHIVE_FLUSH_MS: 600_000,
+      },
+      [[S3, client]],
+    );
+    const service = p.get(ArchiverService);
+    const views = tenViews();
+    await produce(topic, views.slice(0, 5));
+    await eventually(() => held, "the old owner's PUT to start");
+    const [partition] = [...service['writes'].keys()];
+
+    // Rebalance: the new owner reads the partition from offset 0 and writes all ten views.
+    service.consumer.emit('consumer:group:rebalance', {} as never);
+    await service['write'](partition, {
+      firstOffset: 0n,
+      lastOffset: 9n,
+      leaderEpoch: 0,
+      firstTimestamp: BigInt(Date.now()),
+      startedAt: Date.now(),
+      generation: service['generation'],
+      lines: views.map((v) => v.value),
+    });
+    release();
+    await Promise.all(service['writes'].values());
+
+    const keys = await files(bucket);
+    expect(keys).toHaveLength(2);
+    const full = keys.find((k) => k.endsWith('-0-9.jsonl'))!;
+    expect(await lines(bucket, full)).toEqual(views.map((v) => v.value));
+    expect(
+      (await committed(ARCHIVER_GROUP, topic)).filter((o) => o > 0n),
+    ).toEqual([10n]);
+  });
+
+  it('a listing without files, or one that fails, does not undo the archived batch', async () => {
+    const topic = await newTopic('archive');
+    const bucket = newBucket();
+    const client = s3();
+    const realSend = client.send.bind(client);
+    let listing: 'empty' | 'failing' = 'empty';
+    (client as { send: unknown }).send = (command: unknown) => {
+      if (command instanceof ListObjectsV2Command) {
+        return listing === 'empty'
+          ? Promise.resolve({})
+          : Promise.reject(new Error('S3 is down'));
+      }
+      return realSend(command as never);
+    };
+    const p = await archiver(
+      {
+        KAFKA_TOPIC_LOT_VIEWS: topic,
+        S3_BUCKET: bucket,
+        ARCHIVE_BATCH_SIZE: 5,
+        ARCHIVE_FLUSH_MS: 600_000,
+      },
+      [[S3, client]],
+    );
+    await produce(topic, tenViews().slice(0, 5));
+    await eventually(
+      async () =>
+        (await committed(ARCHIVER_GROUP, topic)).some((o) => o === 5n),
+      'the commit after an empty listing',
+    );
+
+    listing = 'failing';
+    await produce(topic, tenViews().slice(0, 5));
+    await eventually(
+      async () =>
+        (await committed(ARCHIVER_GROUP, topic)).some((o) => o === 10n),
+      'the commit when the listing fails',
+    );
+
+    expect(await allLines(bucket)).toHaveLength(10);
+    expect(p).toBeDefined();
   });
 
   it('S3 fails once: the batch is retried, nothing is lost or committed early', async () => {
