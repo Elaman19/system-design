@@ -315,7 +315,7 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 
 ## Домашка 06 — Highload
 
-Задание: [tasks/06 - Highload.md](<tasks/06 - Highload.md>). Неделя про проектирование: кода и миграций нет, `src/` не менялся. Теория (часть 1), мок-интервью в паре и лайв-кодинг пропущены по решению и делаются вручную.
+Задание: [tasks/06 - Highload.md](<tasks/06 - Highload.md>). Неделя про проектирование: кода и миграций нет, `src/` не менялся.
 
 - **Четыре задачи со схемами контейнеров, вариантами с ценой и разбором сбоев:** [docs/highload](docs/highload/README.md). Нестабильный API ([схема](docs/highload/unstable-api.drawio.svg)), RabbitMQ ([схема](docs/highload/rabbitmq-consumer.drawio.svg)), WebSocket ([схема](docs/highload/websocket-fanout.drawio.svg)), Web Crawler ([схема](docs/highload/web-crawler.drawio.svg)).
 - **Архитектура v4** (оценка нагрузки, карта роста с ценой каждой зоны, CAP, почему не шардируем, ADR 0012–0016): [docs/system-design/marketplace-v4/](docs/system-design/marketplace-v4/README.md).
