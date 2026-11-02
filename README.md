@@ -319,6 +319,7 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 
 - **Четыре задачи со схемами контейнеров, вариантами с ценой и разбором сбоев:** [docs/highload](docs/highload/README.md). Нестабильный API ([схема](docs/highload/unstable-api.drawio.svg)), RabbitMQ ([схема](docs/highload/rabbitmq-consumer.drawio.svg)), WebSocket ([схема](docs/highload/websocket-fanout.drawio.svg)), Web Crawler ([схема](docs/highload/web-crawler.drawio.svg)).
 - **Архитектура v4** (оценка нагрузки, карта роста с ценой каждой зоны, CAP, почему не шардируем, ADR 0012–0016): [docs/system-design/marketplace-v4/](docs/system-design/marketplace-v4/README.md).
+- **Шпаргалка к теории** (11 вопросов части 1): [docs/cheatsheet/highload.md](docs/cheatsheet/highload.md).
 - **Диаграммы L1, L2 и Deployment** в `docs/architecture/` не менялись: новых реализованных контейнеров нет.
 
 ![Карта роста v4](docs/system-design/marketplace-v4/growth-map.drawio.svg)
