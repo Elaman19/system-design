@@ -1,0 +1,196 @@
+# SLIs and alerts of docs/observability/README.md, 2.2. Checked by `promtool check rules`.
+#
+# Recording rules: valid and good request rates per window, then the error ratio
+# 1 - good/valid. Alerts are multiwindow burn rates (SRE Workbook): the long window says the
+# budget is really burning, the short one stops the alert as soon as it is fixed.
+groups:
+  - name: sli-lot-card
+    rules:
+      # Lot card: not 5xx, not abandoned, faster than 300 ms. A 404 is good (an honest answer). A ban
+      # never reaches the route (route="unmatched"), so it is outside this SLI; the false-ban guard
+      # below watches it.
+      - record: sli:lot_card:valid:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id"}[5m]))
+      - record: sli:lot_card:good:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="GET",route="/lots/:id",le="0.3",status!~"5..|aborted"}[5m]))
+      - record: sli:lot_card:error_ratio:rate5m
+        expr: 1 - sli:lot_card:good:rate5m / sli:lot_card:valid:rate5m
+      - record: sli:lot_card:valid:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id"}[30m]))
+      - record: sli:lot_card:good:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="GET",route="/lots/:id",le="0.3",status!~"5..|aborted"}[30m]))
+      - record: sli:lot_card:error_ratio:rate30m
+        expr: 1 - sli:lot_card:good:rate30m / sli:lot_card:valid:rate30m
+      - record: sli:lot_card:valid:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id"}[1h]))
+      - record: sli:lot_card:good:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="GET",route="/lots/:id",le="0.3",status!~"5..|aborted"}[1h]))
+      - record: sli:lot_card:error_ratio:rate1h
+        expr: 1 - sli:lot_card:good:rate1h / sli:lot_card:valid:rate1h
+      - record: sli:lot_card:valid:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id"}[6h]))
+      - record: sli:lot_card:good:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="GET",route="/lots/:id",le="0.3",status!~"5..|aborted"}[6h]))
+      - record: sli:lot_card:error_ratio:rate6h
+        expr: 1 - sli:lot_card:good:rate6h / sli:lot_card:valid:rate6h
+      - record: sli:lot_card:valid:rate3d
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id"}[3d]))
+      - record: sli:lot_card:good:rate3d
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="GET",route="/lots/:id",le="0.3",status!~"5..|aborted"}[3d]))
+      - record: sli:lot_card:error_ratio:rate3d
+        expr: 1 - sli:lot_card:good:rate3d / sli:lot_card:valid:rate3d
+  - name: sli-deal
+    rules:
+      # Deal: not 5xx, not 409 RETRY, not abandoned, faster than 1 s. Business refusals
+      # (INSUFFICIENT_FUNDS, OUT_OF_STOCK, OWN_LOT, 422) are good: the system did its job.
+      - record: sli:deal:valid:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="POST",route="/deals"}[5m]))
+      - record: sli:deal:good:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",le="1",status!~"5..|aborted",code!="RETRY"}[5m]))
+      - record: sli:deal:error_ratio:rate5m
+        expr: 1 - sli:deal:good:rate5m / sli:deal:valid:rate5m
+      - record: sli:deal:valid:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="POST",route="/deals"}[30m]))
+      - record: sli:deal:good:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",le="1",status!~"5..|aborted",code!="RETRY"}[30m]))
+      - record: sli:deal:error_ratio:rate30m
+        expr: 1 - sli:deal:good:rate30m / sli:deal:valid:rate30m
+      - record: sli:deal:valid:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="POST",route="/deals"}[1h]))
+      - record: sli:deal:good:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",le="1",status!~"5..|aborted",code!="RETRY"}[1h]))
+      - record: sli:deal:error_ratio:rate1h
+        expr: 1 - sli:deal:good:rate1h / sli:deal:valid:rate1h
+      - record: sli:deal:valid:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="POST",route="/deals"}[6h]))
+      - record: sli:deal:good:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",le="1",status!~"5..|aborted",code!="RETRY"}[6h]))
+      - record: sli:deal:error_ratio:rate6h
+        expr: 1 - sli:deal:good:rate6h / sli:deal:valid:rate6h
+      - record: sli:deal:valid:rate3d
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",method="POST",route="/deals"}[3d]))
+      - record: sli:deal:good:rate3d
+        expr: sum(rate(http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",le="1",status!~"5..|aborted",code!="RETRY"}[3d]))
+      - record: sli:deal:error_ratio:rate3d
+        expr: 1 - sli:deal:good:rate3d / sli:deal:valid:rate3d
+  - name: sli-receipt
+    rules:
+      # Receipt: accepted by SMTP within 300 s of the deal. Only receipts that were sent are in
+      # the histogram; one that is never sent shows up in receipt_oldest_missing_seconds.
+      - record: sli:receipt:error_ratio:rate5m
+        expr: 1 - sum(rate(receipt_delivery_seconds_bucket{le="300"}[5m])) / sum(rate(receipt_delivery_seconds_count[5m]))
+      - record: sli:receipt:error_ratio:rate1h
+        expr: 1 - sum(rate(receipt_delivery_seconds_bucket{le="300"}[1h])) / sum(rate(receipt_delivery_seconds_count[1h]))
+  - name: slo-alerts
+    rules:
+      - alert: LotCardBudgetBurnFast
+        expr: |
+          sli:lot_card:error_ratio:rate1h > 0.0144
+          and sli:lot_card:error_ratio:rate5m > 0.0144
+        labels: { severity: page }
+        annotations:
+          summary: 'Lot card: 2% of the 28-day error budget in an hour'
+          action: 'Deploy in the last hour: roll back. Otherwise the request_id of bad answers in the logs: 503 DB_TIMEOUT -> database (pg_stat_activity), 409 RETRY -> locks on one lot.'
+      - alert: LotCardBudgetBurnSlow
+        expr: |
+          sli:lot_card:error_ratio:rate6h > 0.006
+          and sli:lot_card:error_ratio:rate30m > 0.006
+        labels: { severity: page }
+        annotations:
+          summary: 'Lot card: 5% of the error budget in 6 hours'
+          action: 'Degradation rather than breakage: database latency, one slow app copy (split by instance).'
+      - alert: LotCardBudgetBurnTicket
+        expr: |
+          sli:lot_card:error_ratio:rate3d > 0.001
+          and sli:lot_card:error_ratio:rate6h > 0.001
+        labels: { severity: ticket }
+        annotations:
+          summary: 'Lot card: the budget runs out before the 28 days are over'
+          action: 'Business hours: which share is slow, which is 5xx; index, pool, another copy?'
+      - alert: DealBudgetBurnFast
+        expr: |
+          sli:deal:error_ratio:rate1h > 0.0144
+          and sli:deal:error_ratio:rate5m > 0.0144
+          and (sli:deal:valid:rate1h - sli:deal:good:rate1h) * 3600 >= 5
+        labels: { severity: page }
+        annotations:
+          summary: 'Deal: 2% of the 28-day error budget in an hour'
+          action: 'Deploy in the last hour: roll back. Otherwise the request_id of bad answers in the logs: 503 DB_TIMEOUT -> database (pg_stat_activity), 409 RETRY -> locks on one lot.'
+      - alert: DealBudgetBurnSlow
+        expr: |
+          sli:deal:error_ratio:rate6h > 0.006
+          and sli:deal:error_ratio:rate30m > 0.006
+          and (sli:deal:valid:rate6h - sli:deal:good:rate6h) * 21600 >= 5
+        labels: { severity: page }
+        annotations:
+          summary: 'Deal: 5% of the error budget in 6 hours'
+          action: 'Degradation rather than breakage: database latency, one slow app copy (split by instance).'
+      - alert: DealBudgetBurnTicket
+        expr: |
+          sli:deal:error_ratio:rate3d > 0.001
+          and sli:deal:error_ratio:rate6h > 0.001
+          and (sli:deal:valid:rate3d - sli:deal:good:rate3d) * 259200 >= 5
+        labels: { severity: ticket }
+        annotations:
+          summary: 'Deal: the budget runs out before the 28 days are over'
+          action: 'Business hours: which share is slow, which is 5xx; index, pool, another copy?'
+      - alert: ReceiptBudgetBurnFast
+        expr: |
+          sli:receipt:error_ratio:rate1h > 0.144
+          and sli:receipt:error_ratio:rate5m > 0.144
+        labels: { severity: page }
+        annotations:
+          summary: 'Receipts: more than 14.4% arrive later than 5 minutes'
+          action: 'Same steps as ReceiptMissing.'
+      - alert: ReceiptMissing
+        # The symptom: a buyer has had no receipt for 10 minutes, whatever the API says.
+        expr: max(receipt_oldest_missing_seconds) > 600
+        labels: { severity: page }
+        annotations:
+          summary: 'A deal has had no receipt for more than 10 minutes'
+          action: 'outbox_oldest_unpublished_seconds grows -> relay or Redis. Outbox empty, mail_job_failures_total{final="true"} grows -> SMTP: node scripts/jobs.mjs failed. Both fine -> the worker takes no jobs.'
+      - alert: ReceiptPathBlind
+        # The gauge lives in the relay: no relay (or no database for it) means no symptom
+        # to alert on, which must not read as "all receipts sent".
+        expr: absent(receipt_oldest_missing_seconds)
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: 'Nobody reports the receipt path: outbox-relay is down or cannot read the database'
+          action: 'docker compose ps outbox-relay; its logs; the database from inside the network.'
+  - name: false-ban-guard
+    rules:
+      - record: http:banned_share:rate10m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",code="IP_BANNED"}[10m])) / sum(rate(http_server_request_duration_seconds_count{job="app"}[10m]))
+      - record: http:lot_card_answered:rate10m
+        expr: sum(rate(http_server_request_duration_seconds_count{job="app",route="/lots/:id",status=~"2..|404"}[10m]))
+      # Bans are outside the card SLI: a bot that keeps knocking after its ban must not burn
+      # the budget. The price is that a wrong ban (the balancer's IP) is invisible to the
+      # SLI, so it gets a symptom of its own: many refusals AND the answered card views fell
+      # below half of the same time a week ago. A bot attack alone does not page: real
+      # visitors still get their cards. Needs a week of history before it can fire.
+      - alert: LegitimateTrafficBanned
+        expr: |
+          http:banned_share:rate10m > 0.1
+          and http:lot_card_answered:rate10m < 0.5 * (http:lot_card_answered:rate10m offset 1w)
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: 'Over 10% of requests are refused as banned and card views halved: real visitors are banned'
+          action: 'SELECT ip, banned_from, views FROM ip_bans WHERE now() < banned_until ORDER BY views DESC; a balancer or office IP -> end that ban, fix TRUST_PROXY.'
+      - alert: ManyRequestsBanned
+        expr: http:banned_share:rate10m > 0.1
+        for: 30m
+        labels: { severity: ticket }
+        annotations:
+          summary: 'Over 10% of requests refused as banned for 30 minutes'
+          action: 'Business hours: a real attack (fine) or a ban that is too wide?'
+  - name: processes
+    rules:
+      - alert: ProcessDown
+        expr: up == 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: '{{ $labels.job }} does not answer the scrape'
+          action: 'A cause, not a symptom: it pages only through the SLO alerts above. docker compose ps; logs of the process.'

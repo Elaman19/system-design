@@ -1,0 +1,72 @@
+# promtool test rules: docker run --rm -v "$PWD/docker/prometheus:/p" -w /p \
+#   --entrypoint promtool prom/prometheus:v3.5.0 test rules rules.test.yml
+rule_files:
+  - rules.yml
+evaluation_interval: 1m
+
+tests:
+  # The balancer's IP is banned: nearly everything is refused, card views collapse.
+  - interval: 1m
+    input_series:
+      # A week of normal card traffic before (6000/min), then the ban at 7d.
+      - series: 'http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id",status="200",code=""}'
+        values: '0+6000x10080 60480000+60x60'
+      - series: 'http_server_request_duration_seconds_count{job="app",method="GET",route="unmatched",status="429",code="IP_BANNED"}'
+        values: '0x10080 0+5940x60'
+    alert_rule_test:
+      - eval_time: 7d30m
+        alertname: LegitimateTrafficBanned
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: 'Over 10% of requests are refused as banned and card views halved: real visitors are banned'
+              action: 'SELECT ip, banned_from, views FROM ip_bans WHERE now() < banned_until ORDER BY views DESC; a balancer or office IP -> end that ban, fix TRUST_PROXY.'
+
+  # A bot keeps knocking after its ban: many 429, real visitors unaffected -> no page.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="app",method="GET",route="/lots/:id",status="200",code=""}'
+        values: '0+6000x10140'
+      - series: 'http_server_request_duration_seconds_count{job="app",method="GET",route="unmatched",status="429",code="IP_BANNED"}'
+        values: '0x10080 0+3000x60'
+    alert_rule_test:
+      - eval_time: 7d30m
+        alertname: LegitimateTrafficBanned
+        exp_alerts: []
+
+  # Deal SLI: 409 RETRY is bad, 409 INSUFFICIENT_FUNDS is good.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="app",method="POST",route="/deals",status="201",code=""}'
+        values: '0+80x10'
+      - series: 'http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",status="201",code="",le="1"}'
+        values: '0+80x10'
+      - series: 'http_server_request_duration_seconds_count{job="app",method="POST",route="/deals",status="409",code="INSUFFICIENT_FUNDS"}'
+        values: '0+10x10'
+      - series: 'http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",status="409",code="INSUFFICIENT_FUNDS",le="1"}'
+        values: '0+10x10'
+      - series: 'http_server_request_duration_seconds_count{job="app",method="POST",route="/deals",status="409",code="RETRY"}'
+        values: '0+10x10'
+      - series: 'http_server_request_duration_seconds_bucket{job="app",method="POST",route="/deals",status="409",code="RETRY",le="1"}'
+        values: '0+10x10'
+    promql_expr_test:
+      # 10 RETRY of 100 requests; the 10 refusals for lack of money are good.
+      - expr: round(sli:deal:error_ratio:rate5m, 0.001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0.1
+
+  # A receipt is missing for 11 minutes -> page.
+  - interval: 1m
+    input_series:
+      - series: 'receipt_oldest_missing_seconds{job="outbox-relay"}'
+        values: '0 60 120 180 240 300 360 420 480 540 600 660'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: ReceiptMissing
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: 'A deal has had no receipt for more than 10 minutes'
+              action: 'outbox_oldest_unpublished_seconds grows -> relay or Redis. Outbox empty, mail_job_failures_total{final="true"} grows -> SMTP: node scripts/jobs.mjs failed. Both fine -> the worker takes no jobs.'

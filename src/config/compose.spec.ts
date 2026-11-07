@@ -59,3 +59,38 @@ describe('background processes in compose', () => {
     expect(service(name)).toContain(`dist/entrypoints/${name}.js`);
   });
 });
+
+describe('observability in compose', () => {
+  const compose = readFileSync(new URL('docker-compose.yml', root), 'utf8');
+  const prometheus = readFileSync(
+    new URL('docker/prometheus/prometheus.yml', root),
+    'utf8',
+  );
+  const inNetwork = compose.slice(
+    compose.indexOf('x-in-network-env:'),
+    compose.indexOf('x-node-process:'),
+  );
+
+  it('every process serves metrics and is preloaded with tracing (the env all of them share)', () => {
+    expect(inNetwork).toMatch(/METRICS_PORT: '(\d+)'/);
+    expect(inNetwork).toContain(
+      'NODE_OPTIONS: --import=./dist/entrypoints/tracing.js',
+    );
+  });
+
+  it.each([
+    'app',
+    'outbox-relay',
+    'worker',
+    'clickstream-archiver',
+    'abuse-detector',
+    'ban-recorder',
+    'scheduler',
+  ])('Prometheus scrapes %s on that port', (name) => {
+    const port = /METRICS_PORT: '(\d+)'/.exec(inNetwork)![1];
+
+    expect(prometheus).toContain(
+      `- job_name: ${name}\n    static_configs: [{ targets: ['${name}:${port}'] }]`,
+    );
+  });
+});

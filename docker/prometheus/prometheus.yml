@@ -1,0 +1,25 @@
+# Pull model: every Node process serves GET /metrics on METRICS_PORT (9464) inside the
+# Compose network; nothing but Prometheus (UI on :9090) is published to the host.
+# One job per process, so `up{job="worker"} == 0` names the process that is down.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - rules.yml
+
+scrape_configs:
+  - job_name: app
+    static_configs: [{ targets: ['app:9464'] }]
+  - job_name: outbox-relay
+    static_configs: [{ targets: ['outbox-relay:9464'] }]
+  - job_name: worker
+    static_configs: [{ targets: ['worker:9464'] }]
+  - job_name: clickstream-archiver
+    static_configs: [{ targets: ['clickstream-archiver:9464'] }]
+  - job_name: abuse-detector
+    static_configs: [{ targets: ['abuse-detector:9464'] }]
+  - job_name: ban-recorder
+    static_configs: [{ targets: ['ban-recorder:9464'] }]
+  - job_name: scheduler
+    static_configs: [{ targets: ['scheduler:9464'] }]

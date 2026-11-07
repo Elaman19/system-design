@@ -8,12 +8,14 @@ import { PgErrorFilter } from './db/pg-error.filter.js';
 import { DealsModule } from './deals/deals.module.js';
 import { HealthModule } from './health/health.module.js';
 import { LotsModule } from './lots/lots.module.js';
+import { HttpMetricsModule } from './observability/http-metrics.js';
 import { WalletsModule } from './wallets/wallets.module.js';
 
 @Module({
   imports: [
     CoreModule,
     DatabaseModule,
+    HttpMetricsModule,
     BanGuardModule,
     HealthModule,
     CompaniesModule,

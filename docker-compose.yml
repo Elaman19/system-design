@@ -9,6 +9,12 @@ x-in-network-env: &in-network-env
   S3_ENDPOINT: http://seaweedfs:8333
   KAFKA_BROKERS: kafka:9092
   MAIL_SMTP_URL: smtp://mailpit:1025
+  # Observability (docs/observability): every process serves /metrics on this port inside
+  # the network for Prometheus, and is traced from its first import by the preload, which
+  # sends spans to Jaeger. The service name of a trace is the process (app, worker, ...).
+  METRICS_PORT: '9464'
+  NODE_OPTIONS: --import=./dist/entrypoints/tracing.js
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
 
 x-node-process: &node-process
   build: .
@@ -291,9 +297,41 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Observability ------------------------------------------------------
+  # Not a dependency of anyone: the system works the same without them, it is only blind.
+
+  # Pulls /metrics of every process, evaluates the SLI recording rules and the alerts
+  # (docker/prometheus/rules.yml; tested by rules.test.yml). UI and alerts: :9090.
+  # No Alertmanager: firing alerts are seen in the UI, nobody is paged (see the docs).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 28-day SLO window plus a margin: the 3-day burn rate and the week-ago comparison
+      # of the false-ban guard fit inside.
+      - --storage.tsdb.retention.time=35d
+    volumes:
+      - ./docker/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/-/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Receives spans over OTLP (4318, inside the network) and shows traces: UI :16686.
+  # In-memory storage: traces are gone on restart, fine for a local stack.
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    ports:
+      - '16686:16686'
+
 volumes:
   pgdata:
   redis-data:
   opensearch-data:
   seaweedfs-data:
   kafka-data:
+  prometheus-data:

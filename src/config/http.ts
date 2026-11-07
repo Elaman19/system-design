@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { HttpMetrics } from '../observability/http-metrics.js';
 import type { Env } from './env.js';
 
 /** Express reads "true", "3", "loopback" and CIDR lists differently; env gives only text. */
@@ -14,6 +15,9 @@ export function parseTrustProxy(value: string): boolean | number | string {
  * must name the real proxies; "true" (trust everyone) lets a client choose its own IP.
  */
 export function configureHttp(app: INestApplication, env: Env) {
+  // Registered before Nest's own middleware (the ban check, the request log) runs, so
+  // every answer is measured, a 429 from the ban check included.
+  app.use(app.get(HttpMetrics).middleware);
   if (env.TRUST_PROXY !== undefined) {
     app
       .getHttpAdapter()

@@ -17,11 +17,23 @@ describe('parseTrustProxy', () => {
 describe('configureHttp', () => {
   const appWith = () => {
     const set = vi.fn();
+    const use = vi.fn();
+    const middleware = () => undefined;
     const app = {
+      get: () => ({ middleware }),
+      use,
       getHttpAdapter: () => ({ getInstance: () => ({ set }) }),
     } as unknown as INestApplication;
-    return { app, set };
+    return { app, set, use, middleware };
   };
+
+  it('measures every request, before any other middleware can answer it', () => {
+    const { app, use, middleware } = appWith();
+
+    configureHttp(app, {} as Env);
+
+    expect(use).toHaveBeenCalledWith(middleware);
+  });
 
   it('tells Express which proxies to trust', () => {
     const { app, set } = appWith();

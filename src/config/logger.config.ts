@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Params } from 'nestjs-pino';
+import { errorCodeOf } from '../observability/http-metrics.js';
 import type { Env } from './env.js';
 
 const HEALTH_PATHS = new Set(['/live', '/ready']);
@@ -34,6 +35,11 @@ export function loggerConfig(env: Env): Params {
       ...baseLogOptions(env),
       genReqId,
       redact: ['req.headers.authorization', 'req.headers.cookie'],
+      // The status alone does not tell a 409 RETRY from a 409 OUT_OF_STOCK.
+      customProps: (_req, res) => {
+        const code = errorCodeOf(res);
+        return code === undefined ? {} : { error_code: code };
+      },
       // Probes fire every few seconds; logging them drowns real traffic.
       autoLogging: {
         ignore: (req) => HEALTH_PATHS.has(req.url ?? ''),

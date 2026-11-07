@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
+import { Registry } from 'prom-client';
 import { JobName } from '../../src/queue/jobs.js';
 import { ReceiptJob } from '../../src/receipts/receipt.job.js';
 import { WorkerModule } from '../../src/worker/worker.module.js';
@@ -92,6 +93,29 @@ describe('the receipt of a deal', () => {
     expect(results).toEqual(['sent', 'duplicate', 'duplicate']);
     expect(p.mailer.to(buyerEmail)).toHaveLength(1);
     expect(await receiptRows(dealId)).toBe(1);
+    // One delivery measured, not three.
+    expect(await p.get(Registry).metrics()).toContain(
+      'receipt_delivery_seconds_count 1',
+    );
+  });
+
+  it('sent_at is when SMTP accepted the mail, not when the job started: the SLI sees a slow server', async () => {
+    const { dealId } = await purchase();
+    const p = await worker();
+    p.mailer.delayMs = 300;
+
+    await p.get(ReceiptJob).run(dealId);
+
+    const [row] = await h.db.query(
+      `SELECT extract(epoch FROM r.sent_at - d.created_at)::float8 AS seconds
+         FROM deal_receipts r JOIN deals d ON d.id = r.deal_id
+        WHERE r.deal_id = $1`,
+      [dealId],
+    );
+    expect(row.seconds).toBeGreaterThanOrEqual(0.3);
+    const text = await p.get(Registry).metrics();
+    const sum = Number(/^receipt_delivery_seconds_sum (\S+)$/m.exec(text)?.[1]);
+    expect(sum).toBeCloseTo(row.seconds, 3);
   });
 
   it('the mail says what was bought and what it cost', async () => {
@@ -108,10 +132,10 @@ describe('the receipt of a deal', () => {
     expect(mail.text).toContain('Итого списано: 2469.12');
   });
 
-  it('three runs at the same moment: still one mail (the primary key is the lock)', async () => {
+  it('three runs at the same moment: still one mail (the deal row is the lock)', async () => {
     const { dealId, buyerEmail } = await purchase();
     const p = await worker();
-    p.mailer.delayMs = 150; // long enough for the others to queue on the unique index
+    p.mailer.delayMs = 150; // long enough for the others to queue on the deal's row lock
 
     const results = await Promise.all([
       p.get(ReceiptJob).run(dealId),

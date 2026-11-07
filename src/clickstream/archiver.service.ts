@@ -120,9 +120,11 @@ export class ArchiverService
       mode: 'committed',
       fallbackMode: 'earliest',
     });
+    // Ticks at half the flush time (at most once a second): a batch is written at most
+    // 50% late, and every batch is seen at least once before it is overdue.
     this.ticker = setInterval(
       () => this.flushOverdue(),
-      Math.min(1000, this.env.ARCHIVE_FLUSH_MS),
+      Math.max(1, Math.min(1000, Math.floor(this.env.ARCHIVE_FLUSH_MS / 2))),
     ).unref();
     this.reading = readStream(
       stream,

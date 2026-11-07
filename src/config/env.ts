@@ -91,6 +91,10 @@ const envSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .optional(),
 
+  // Port of the Prometheus endpoint (GET /metrics) of this process; 0 picks a free one.
+  // Unset: metrics are counted but not served.
+  METRICS_PORT: z.coerce.number().int().nonnegative().optional(),
+
   HEALTH_TIMEOUT_MS: positiveInt.default(1500),
   SHUTDOWN_DRAIN_MS: z.coerce.number().int().nonnegative().default(5000),
   SHUTDOWN_TIMEOUT_MS: positiveInt.default(10000),

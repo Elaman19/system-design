@@ -1,5 +1,6 @@
 import { UnrecoverableError, type Job } from 'bullmq';
 import type { PinoLogger } from 'nestjs-pino';
+import { Registry } from 'prom-client';
 import type { BanAlertJob } from '../bans/ban-alert.job.js';
 import type { ReceiptJob } from '../receipts/receipt.job.js';
 import type { DailyReportJob } from '../reports/daily-report.job.js';
@@ -12,6 +13,7 @@ describe('MailProcessor', () => {
     { run: vi.fn() } as unknown as BanAlertJob,
     { run: vi.fn() } as unknown as DailyReportJob,
     logger as unknown as PinoLogger,
+    new Registry(),
   );
   beforeEach(() => vi.clearAllMocks());
 
@@ -65,6 +67,32 @@ describe('MailProcessor', () => {
     processor.onFailed(undefined, new Error('x'));
 
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('counts failures by job name, the final ones apart', async () => {
+    const registry = new Registry();
+    const counted = new MailProcessor(
+      { run: vi.fn() } as unknown as ReceiptJob,
+      { run: vi.fn() } as unknown as BanAlertJob,
+      { run: vi.fn() } as unknown as DailyReportJob,
+      logger as unknown as PinoLogger,
+      registry,
+    );
+
+    counted.onFailed(job(1, 5), new Error('x'));
+    counted.onFailed(job(5, 5), new Error('x'));
+    counted.onFailed(undefined, new Error('x'));
+
+    const text = await registry.metrics();
+    expect(text).toContain(
+      'mail_job_failures_total{name="deal-receipt",final="false"} 1',
+    );
+    expect(text).toContain(
+      'mail_job_failures_total{name="deal-receipt",final="true"} 1',
+    );
+    expect(text).toContain(
+      'mail_job_failures_total{name="unknown",final="false"} 1',
+    );
   });
 
   it('connection errors of the worker are logged', () => {

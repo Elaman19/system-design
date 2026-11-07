@@ -1,4 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { EventEmitter } from 'node:events';
+import type { NextFunction, Request, Response } from 'express';
+import { Registry } from 'prom-client';
+import { HttpMetrics } from '../observability/http-metrics.js';
 import type { Env } from './env.js';
 import { baseLogOptions, genReqId, loggerConfig } from './logger.config.js';
 
@@ -35,6 +39,40 @@ describe('loggerConfig', () => {
     expect(ignore({ url: '/ready' })).toBe(true);
     expect(ignore({ url: '/work' })).toBe(false);
     expect(ignore({})).toBe(false);
+  });
+});
+
+describe('error_code in the request log', () => {
+  const customProps = loggerConfig(env({})).pinoHttp as unknown as {
+    customProps: (req: unknown, res: unknown) => object;
+  };
+  const response = () => {
+    const res = Object.assign(new EventEmitter(), {
+      json: vi.fn(),
+    }) as unknown as Response;
+    new HttpMetrics(new Registry()).middleware(
+      { method: 'POST' } as Request,
+      res,
+      vi.fn() as NextFunction,
+    );
+    return res;
+  };
+
+  it('carries the code of the error body: 409 RETRY is not 409 OUT_OF_STOCK', () => {
+    const res = response();
+
+    res.json({ statusCode: 409, code: 'RETRY', message: '...' });
+
+    expect(customProps.customProps({}, res)).toEqual({ error_code: 'RETRY' });
+  });
+
+  it('adds nothing to a success or a body without a code', () => {
+    const res = response();
+
+    res.json({ id: 1 });
+    res.json(null);
+
+    expect(customProps.customProps({}, res)).toEqual({});
   });
 });
 
