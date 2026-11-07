@@ -77,10 +77,36 @@ groups:
     rules:
       # Receipt: accepted by SMTP within 300 s of the deal. Only receipts that were sent are in
       # the histogram; one that is never sent shows up in receipt_oldest_missing_seconds.
+      - record: sli:receipt:valid:rate5m
+        expr: sum(rate(receipt_delivery_seconds_count[5m]))
+      - record: sli:receipt:good:rate5m
+        expr: sum(rate(receipt_delivery_seconds_bucket{le="300"}[5m]))
       - record: sli:receipt:error_ratio:rate5m
-        expr: 1 - sum(rate(receipt_delivery_seconds_bucket{le="300"}[5m])) / sum(rate(receipt_delivery_seconds_count[5m]))
+        expr: 1 - sli:receipt:good:rate5m / sli:receipt:valid:rate5m
+      - record: sli:receipt:valid:rate30m
+        expr: sum(rate(receipt_delivery_seconds_count[30m]))
+      - record: sli:receipt:good:rate30m
+        expr: sum(rate(receipt_delivery_seconds_bucket{le="300"}[30m]))
+      - record: sli:receipt:error_ratio:rate30m
+        expr: 1 - sli:receipt:good:rate30m / sli:receipt:valid:rate30m
+      - record: sli:receipt:valid:rate1h
+        expr: sum(rate(receipt_delivery_seconds_count[1h]))
+      - record: sli:receipt:good:rate1h
+        expr: sum(rate(receipt_delivery_seconds_bucket{le="300"}[1h]))
       - record: sli:receipt:error_ratio:rate1h
-        expr: 1 - sum(rate(receipt_delivery_seconds_bucket{le="300"}[1h])) / sum(rate(receipt_delivery_seconds_count[1h]))
+        expr: 1 - sli:receipt:good:rate1h / sli:receipt:valid:rate1h
+      - record: sli:receipt:valid:rate6h
+        expr: sum(rate(receipt_delivery_seconds_count[6h]))
+      - record: sli:receipt:good:rate6h
+        expr: sum(rate(receipt_delivery_seconds_bucket{le="300"}[6h]))
+      - record: sli:receipt:error_ratio:rate6h
+        expr: 1 - sli:receipt:good:rate6h / sli:receipt:valid:rate6h
+      - record: sli:receipt:valid:rate3d
+        expr: sum(rate(receipt_delivery_seconds_count[3d]))
+      - record: sli:receipt:good:rate3d
+        expr: sum(rate(receipt_delivery_seconds_bucket{le="300"}[3d]))
+      - record: sli:receipt:error_ratio:rate3d
+        expr: 1 - sli:receipt:good:rate3d / sli:receipt:valid:rate3d
   - name: slo-alerts
     rules:
       - alert: LotCardBudgetBurnFast
@@ -134,14 +160,35 @@ groups:
         annotations:
           summary: 'Deal: the budget runs out before the 28 days are over'
           action: 'Business hours: which share is slow, which is 5xx; index, pool, another copy?'
+      # SLO 99% (budget 1%): the same burn rates as above, ten times the share. Receipts are
+      # as few as deals (~130 an hour by day), so the same floor of 5 late ones applies.
       - alert: ReceiptBudgetBurnFast
         expr: |
           sli:receipt:error_ratio:rate1h > 0.144
           and sli:receipt:error_ratio:rate5m > 0.144
+          and (sli:receipt:valid:rate1h - sli:receipt:good:rate1h) * 3600 >= 5
         labels: { severity: page }
         annotations:
-          summary: 'Receipts: more than 14.4% arrive later than 5 minutes'
+          summary: 'Receipts: more than 14.4% arrive later than 5 minutes (2% of the budget in an hour)'
           action: 'Same steps as ReceiptMissing.'
+      - alert: ReceiptBudgetBurnSlow
+        expr: |
+          sli:receipt:error_ratio:rate6h > 0.06
+          and sli:receipt:error_ratio:rate30m > 0.06
+          and (sli:receipt:valid:rate6h - sli:receipt:good:rate6h) * 21600 >= 5
+        labels: { severity: page }
+        annotations:
+          summary: 'Receipts: more than 6% late for 6 hours (5% of the budget)'
+          action: 'Slow rather than stopped: SMTP answer time, retries in mail_job_failures_total{final="false"}, the waiting count of the mail queue.'
+      - alert: ReceiptBudgetBurnTicket
+        expr: |
+          sli:receipt:error_ratio:rate3d > 0.01
+          and sli:receipt:error_ratio:rate6h > 0.01
+          and (sli:receipt:valid:rate3d - sli:receipt:good:rate3d) * 259200 >= 5
+        labels: { severity: ticket }
+        annotations:
+          summary: 'Receipts: the budget runs out before the 28 days are over'
+          action: 'Business hours: where the time goes (outbox age, queue wait, SMTP); worker concurrency, another worker copy?'
       - alert: ReceiptMissing
         # The symptom: a buyer has had no receipt for 10 minutes, whatever the API says.
         expr: max(receipt_oldest_missing_seconds) > 600

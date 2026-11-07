@@ -378,3 +378,29 @@ docker compose logs app | grep ShutdownService   # какие хуки и в к�
 | 8   | Следы правок («прежний bulkhead»), `ZSET` на схеме краулера                               | текст и схемы исправлены                                                                                    |
 
 Не сделано по этому ревью: история коммита (`CLAUDE.md` внутри «task 6», сообщение коммита) не переписывалась.
+
+## Домашка 07 — мониторинг и observability
+
+Задание: [tasks/07 - Monitoring and observability.md](<tasks/07 - Monitoring and observability.md>). Решения, цифры и цена каждого — в [docs/observability/README.md](docs/observability/README.md).
+
+- **2.1 Дашборд бизнес-метрик:** 6 метрик с источником (деньги — из базы, запросы — из приложения), [набросок дашборда](docs/observability/business-dashboard.drawio.svg), 3 алерта с выбором «фиксированный порог или неделя назад».
+- **2.2 SLI, SLO, SLA:** карточка лота, сделка, чек на почту; цена девяток; burn rate в трёх окнах; асинхронный путь чека — симптом «самая старая сделка без чека» и синтетическая проверка через Mailpit ([scripts/receipt-probe.mjs](scripts/receipt-probe.mjs)).
+- **2.6 (по желанию) подключено к проекту:** `/metrics` в каждом процессе (`prom-client`, порт `METRICS_PORT`), Prometheus с recording rules SLI и алертами ([docker/prometheus](docker/prometheus/), логика алертов проверена `promtool test rules`), OpenTelemetry → Jaeger, `trace_id` и `error_code` в логах pino. Чтобы SLI чека мерил весь путь, `deal_receipts.sent_at` теперь ставится после ответа SMTP (блокировка — строка сделки).
+- **Диаграммы:** на [L2](<docs/architecture/L2 - Containers.drawio.svg>) и [Deployment](<docs/architecture/Deployment - Docker Compose.drawio.svg>) добавлены `prometheus` и `jaeger`; L1 не менялась: новых внешних систем и пользователей нет.
+
+```bash
+docker compose up -d --build   # + Prometheus :9090, Jaeger :16686
+docker run --rm -v "$PWD/docker/prometheus:/p" -w /p --entrypoint promtool \
+  prom/prometheus:v3.5.0 test rules rules.test.yml
+node scripts/receipt-probe.mjs   # сделка -> чек в Mailpit, GOOD/BAD
+```
+
+### Приёмочный прогон
+
+| Критерий                                                                 | Результат                                                                                            |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| 2.1: 4–6 бизнес-метрик с источником, набросок дашборда, 2–3 алерта       | выполнено: [docs/observability, 2.1](docs/observability/README.md#21-дашборд-бизнес-метрик-и-алерты) |
+| 2.2: 2–3 пути с SLI, SLO, SLA; алерты на симптомы; асинхронный путь      | выполнено: [docs/observability, 2.2](docs/observability/README.md#22-sli-slo-sla-и-алерты)           |
+| 2.3: аудит-лог                                                           | **не выполнено**: каркас готов, черновик решения пишется вручную                                     |
+| 2.6 (по желанию): метрики, трейсы, логи с `trace_id`                     | выполнено: Prometheus, OpenTelemetry → Jaeger; `npm run ci` зелёный                                  |
+| Часть 1 (теория вслух), 2.4 лайв-кодинг, 2.5 мок-интервью и ревью в паре | **не выполнено**: делается вручную вне репозитория                                                   |

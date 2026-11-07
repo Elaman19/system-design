@@ -70,3 +70,22 @@ tests:
             exp_annotations:
               summary: 'A deal has had no receipt for more than 10 minutes'
               action: 'outbox_oldest_unpublished_seconds grows -> relay or Redis. Outbox empty, mail_job_failures_total{final="true"} grows -> SMTP: node scripts/jobs.mjs failed. Both fine -> the worker takes no jobs.'
+
+  # Receipt SLI: 6 of 100 receipts later than 5 minutes for 6 hours -> slow burn page.
+  - interval: 1m
+    input_series:
+      - series: 'receipt_delivery_seconds_count{job="worker"}'
+        values: '0+100x420'
+      - series: 'receipt_delivery_seconds_bucket{job="worker",le="300"}'
+        values: '0+93x420'
+    alert_rule_test:
+      - eval_time: 6h30m
+        alertname: ReceiptBudgetBurnSlow
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: 'Receipts: more than 6% late for 6 hours (5% of the budget)'
+              action: 'Slow rather than stopped: SMTP answer time, retries in mail_job_failures_total{final="false"}, the waiting count of the mail queue.'
+      - eval_time: 6h30m
+        alertname: ReceiptBudgetBurnFast
+        exp_alerts: []
